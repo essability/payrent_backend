@@ -62,7 +62,11 @@ const server = http.createServer(async (req, res) => {
         const phoneNumber = normalizeWhatsAppPhone(form.From);
         const waId = form.WaId || phoneNumber;
         const message = form.Body || "";
-        const decision = decidePayRentWelcomeReply(message);
+        const decision = await decidePayRentWelcomeReply({
+          message,
+          phoneNumber,
+          formBaseUrl: publicBaseUrlFromRequest(req)
+        });
 
         console.log("Step 3");
         sendText(res, 200, twiml(decision.reply), "text/xml; charset=utf-8");
@@ -80,6 +84,50 @@ const server = http.createServer(async (req, res) => {
       }
 
       sendText(res, 200, twiml(WELCOME_MENU), "text/xml; charset=utf-8");
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/forms/tenant-registration") {
+      sendText(
+        res,
+        200,
+        renderTenantRegistrationForm({
+          phoneNumber: url.searchParams.get("phone") || "",
+          waId: url.searchParams.get("wa_id") || ""
+        }),
+        "text/html; charset=utf-8"
+      );
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/forms/save-towards-rent") {
+      sendText(
+        res,
+        200,
+        renderSaveTowardsRentForm({
+          phoneNumber: url.searchParams.get("phone") || "",
+          waId: url.searchParams.get("wa_id") || ""
+        }),
+        "text/html; charset=utf-8"
+      );
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/forms/tenant-registration") {
+      await handleFormSubmission({
+        req,
+        res,
+        flowName: "tenant_registration"
+      });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/forms/save-towards-rent") {
+      await handleFormSubmission({
+        req,
+        res,
+        flowName: "save_towards_rent"
+      });
       return;
     }
 
@@ -258,9 +306,26 @@ function publicUrlFromRequest(req, url) {
   return `${proto}://${host}${url.pathname}`;
 }
 
-function decidePayRentWelcomeReply(message) {
+function publicBaseUrlFromRequest(req) {
+  if (config.publicBaseUrl) return config.publicBaseUrl.replace(/\/$/, "");
+  const proto = req.headers["x-forwarded-proto"] || "https";
+  const host = req.headers["x-forwarded-host"] || req.headers.host;
+  return `${proto}://${host}`;
+}
+
+async function decidePayRentWelcomeReply({ message, phoneNumber, formBaseUrl }) {
   const text = String(message || "").trim();
   const normalized = text.toLowerCase();
+  const tenantFormUrl = buildFormUrl(formBaseUrl, "/forms/tenant-registration", phoneNumber);
+  const saveFormUrl = buildFormUrl(formBaseUrl, "/forms/save-towards-rent", phoneNumber);
+
+  const activeSession = await getActiveSessionForDecision(phoneNumber);
+  if (activeSession?.current_step?.startsWith("chat_tenant_")) {
+    return advanceTenantChatSession(activeSession, text);
+  }
+  if (activeSession?.current_step?.startsWith("chat_save_")) {
+    return advanceSaveChatSession(activeSession, text);
+  }
 
   if (normalized.startsWith("tenant:")) {
     return {
@@ -285,12 +350,18 @@ function decidePayRentWelcomeReply(message) {
         "",
         "I’m opening the Tenant Registration form for you now.",
         "",
-        "If the form does not open in this WhatsApp Sandbox, reply like this:",
-        "TENANT: Full Name, Phone Number, Email or -, Invitation Code or NO, Monthly Rent, Rent Due Day"
+        "Tap here to fill it inside WhatsApp:",
+        tenantFormUrl,
+        "",
+        "If the link does not open, no stress. We can continue here.",
+        "",
+        "First, what is your full name?"
       ].join("\n"),
       selectedOption: "1",
       selectedUserType: "tenant",
-      flowName: "tenant_registration"
+      flowName: "tenant_registration",
+      currentStep: "chat_tenant_full_name",
+      sessionData: {}
     };
   }
 
@@ -301,12 +372,18 @@ function decidePayRentWelcomeReply(message) {
         "",
         "I’m opening the Save Towards Rent form for you now.",
         "",
-        "If the form does not open in this WhatsApp Sandbox, reply like this:",
-        "SAVE: Full Name, Phone Number, Monthly Rent, Rent Due Day, Daily/Weekly/Monthly, Target Start Date or -"
+        "Tap here to fill it inside WhatsApp:",
+        saveFormUrl,
+        "",
+        "If the link does not open, no stress. We can continue here.",
+        "",
+        "First, what is your full name?"
       ].join("\n"),
       selectedOption: "4",
       selectedUserType: "save_towards_rent",
-      flowName: "save_towards_rent"
+      flowName: "save_towards_rent",
+      currentStep: "chat_save_full_name",
+      sessionData: {}
     };
   }
 
@@ -333,6 +410,179 @@ function decidePayRentWelcomeReply(message) {
   };
 }
 
+function buildFormUrl(baseUrl, pathname, phoneNumber) {
+  const url = new URL(pathname, baseUrl);
+  if (phoneNumber) {
+    url.searchParams.set("phone", phoneNumber);
+    url.searchParams.set("wa_id", phoneNumber);
+  }
+  return url.toString();
+}
+
+async function getActiveSessionForDecision(phoneNumber) {
+  try {
+    return await service.getActiveOnboardingSession(phoneNumber);
+  } catch (error) {
+    console.error("Onboarding Session Lookup Error:", error);
+    return null;
+  }
+}
+
+function advanceTenantChatSession(session, text) {
+  const data = session.data || {};
+
+  if (session.current_step === "chat_tenant_full_name") {
+    return {
+      reply: "Thank you. What phone number should we use for your PayRent account?",
+      selectedOption: "1",
+      selectedUserType: "tenant",
+      currentStep: "chat_tenant_phone_number",
+      sessionData: { ...data, full_name: text }
+    };
+  }
+
+  if (session.current_step === "chat_tenant_phone_number") {
+    return {
+      reply: "Got it. What is your email address? Reply - if you want to skip.",
+      selectedOption: "1",
+      selectedUserType: "tenant",
+      currentStep: "chat_tenant_email",
+      sessionData: { ...data, phone_number: text }
+    };
+  }
+
+  if (session.current_step === "chat_tenant_email") {
+    return {
+      reply: "Do you have an invitation code? Reply YES or NO.",
+      selectedOption: "1",
+      selectedUserType: "tenant",
+      currentStep: "chat_tenant_has_invitation",
+      sessionData: { ...data, email: text === "-" ? "" : text }
+    };
+  }
+
+  if (session.current_step === "chat_tenant_has_invitation") {
+    const hasInvitation = ["yes", "y"].includes(text.toLowerCase());
+    return {
+      reply: hasInvitation ? "Please enter your invitation code." : "How much is your monthly rent? Example: 15000",
+      selectedOption: "1",
+      selectedUserType: "tenant",
+      currentStep: hasInvitation ? "chat_tenant_invitation_code" : "chat_tenant_monthly_rent",
+      sessionData: { ...data, has_invitation_code: hasInvitation ? "yes" : "no" }
+    };
+  }
+
+  if (session.current_step === "chat_tenant_invitation_code") {
+    return {
+      reply: "How much is your monthly rent? Example: 15000",
+      selectedOption: "1",
+      selectedUserType: "tenant",
+      currentStep: "chat_tenant_monthly_rent",
+      sessionData: { ...data, invitation_code: text }
+    };
+  }
+
+  if (session.current_step === "chat_tenant_monthly_rent") {
+    return {
+      reply: "What day of the month is rent due? Example: 5",
+      selectedOption: "1",
+      selectedUserType: "tenant",
+      currentStep: "chat_tenant_rent_due_day",
+      sessionData: { ...data, monthly_rent_amount: text }
+    };
+  }
+
+  if (session.current_step === "chat_tenant_rent_due_day") {
+    const payload = { ...data, rent_due_day: text, flow_name: "tenant_registration" };
+    return {
+      reply: "Thank you ❤️ We’re creating your PayRent tenant profile now.",
+      selectedOption: "1",
+      selectedUserType: "tenant",
+      currentStep: "completed",
+      sessionData: payload,
+      fallbackFlowName: "tenant_registration",
+      fallbackPayload: payload,
+      completeSession: true
+    };
+  }
+
+  return { reply: WELCOME_MENU };
+}
+
+function advanceSaveChatSession(session, text) {
+  const data = session.data || {};
+
+  if (session.current_step === "chat_save_full_name") {
+    return {
+      reply: "Thank you. What phone number should we use for your PayRent savings goal?",
+      selectedOption: "4",
+      selectedUserType: "save_towards_rent",
+      currentStep: "chat_save_phone_number",
+      sessionData: { ...data, full_name: text }
+    };
+  }
+
+  if (session.current_step === "chat_save_phone_number") {
+    return {
+      reply: "How much is your monthly rent? Example: 15000",
+      selectedOption: "4",
+      selectedUserType: "save_towards_rent",
+      currentStep: "chat_save_monthly_rent",
+      sessionData: { ...data, phone_number: text }
+    };
+  }
+
+  if (session.current_step === "chat_save_monthly_rent") {
+    return {
+      reply: "What day of the month is rent due? Example: 5",
+      selectedOption: "4",
+      selectedUserType: "save_towards_rent",
+      currentStep: "chat_save_rent_due_day",
+      sessionData: { ...data, monthly_rent_amount: text }
+    };
+  }
+
+  if (session.current_step === "chat_save_rent_due_day") {
+    return {
+      reply: "How often do you want to save? Reply Daily, Weekly, or Monthly.",
+      selectedOption: "4",
+      selectedUserType: "save_towards_rent",
+      currentStep: "chat_save_frequency",
+      sessionData: { ...data, rent_due_day: text }
+    };
+  }
+
+  if (session.current_step === "chat_save_frequency") {
+    return {
+      reply: "When do you want to start? Reply with YYYY-MM-DD, or - to skip.",
+      selectedOption: "4",
+      selectedUserType: "save_towards_rent",
+      currentStep: "chat_save_target_start_date",
+      sessionData: { ...data, savings_frequency: text.toLowerCase() }
+    };
+  }
+
+  if (session.current_step === "chat_save_target_start_date") {
+    const payload = {
+      ...data,
+      target_start_date: text === "-" ? "" : text,
+      flow_name: "save_towards_rent"
+    };
+    return {
+      reply: "Beautiful ❤️ We’re creating your rent savings goal now.",
+      selectedOption: "4",
+      selectedUserType: "save_towards_rent",
+      currentStep: "completed",
+      sessionData: payload,
+      fallbackFlowName: "save_towards_rent",
+      fallbackPayload: payload,
+      completeSession: true
+    };
+  }
+
+  return { reply: WELCOME_MENU };
+}
+
 function handleWhatsAppWebhookInBackground({ phoneNumber, waId, incomingMessage, outgoingMessage, decision }) {
   setImmediate(async () => {
     try {
@@ -354,8 +604,19 @@ function handleWhatsAppWebhookInBackground({ phoneNumber, waId, incomingMessage,
         waId,
         selectedOption: decision.selectedOption,
         selectedUserType: decision.selectedUserType,
-        currentStep: decision.flowName ? "flow_launch_requested" : "choose_user_type"
+        currentStep: decision.currentStep || (decision.flowName ? "flow_launch_requested" : "choose_user_type")
       });
+      const activeSession = await service.getActiveOnboardingSession(phoneNumber);
+      if (activeSession && decision.sessionData) {
+        await service.updateOnboardingSession({
+          id: activeSession.id,
+          currentStep: decision.currentStep || activeSession.current_step,
+          data: decision.sessionData,
+          selectedOption: decision.selectedOption,
+          selectedUserType: decision.selectedUserType,
+          status: decision.completeSession ? "completed" : "active"
+        });
+      }
 
       if (decision.fallbackFlowName && decision.fallbackPayload) {
         await processFallbackSubmission({
@@ -492,4 +753,225 @@ function parseColonCsvPayload(text, kind) {
     savings_frequency: parts[4],
     target_start_date: parts[5] === "-" ? "" : parts[5]
   };
+}
+
+async function handleFormSubmission({ req, res, flowName }) {
+  try {
+    const form = await readForm(req);
+    console.log(`Incoming ${flowName} web form:`, form);
+    const payload = Object.fromEntries(
+      Object.entries(form).filter(([key]) => !["wa_id", "source"].includes(key))
+    );
+    const phoneNumber = payload.phone_number || payload.tenant_phone_number || form.phone || "";
+    const result = await flowProcessor.process({
+      flowName,
+      source: "whatsapp_in_app_web_form",
+      phoneNumber,
+      payload
+    });
+    const confirmation = flowProcessor.confirmationMessage(flowName, payload);
+
+    if (phoneNumber) {
+      sendWhatsAppBodyInBackground({
+        to: phoneNumber,
+        body: confirmation
+      });
+    }
+
+    sendText(res, 200, renderSuccessPage(confirmation), "text/html; charset=utf-8");
+    console.log(`${flowName} web form processed:`, result.submissionId);
+  } catch (error) {
+    console.error("Web Form Error:", error);
+    sendText(
+      res,
+      200,
+      renderSuccessPage("We received your form, but could not complete setup yet. Please return to WhatsApp and send Hi so we can help you continue."),
+      "text/html; charset=utf-8"
+    );
+  }
+}
+
+function renderTenantRegistrationForm({ phoneNumber, waId }) {
+  return renderFormPage({
+    title: "Tenant Registration",
+    intro: "Create your PayRent tenant profile and rent goal.",
+    action: "/forms/tenant-registration",
+    hidden: { wa_id: waId },
+    fields: [
+      inputField("Full Name", "full_name", "text", "", true),
+      inputField("Phone Number", "phone_number", "tel", phoneNumber, true),
+      inputField("Email", "email", "email", "", false),
+      selectField("Do you have an invitation code?", "has_invitation_code", [
+        ["no", "No"],
+        ["yes", "Yes"]
+      ]),
+      inputField("Invitation Code", "invitation_code", "text", "", false),
+      inputField("Monthly Rent Amount", "monthly_rent_amount", "number", "", true),
+      inputField("Rent Due Day", "rent_due_day", "number", "", true)
+    ],
+    submitLabel: "Create tenant profile"
+  });
+}
+
+function renderSaveTowardsRentForm({ phoneNumber, waId }) {
+  return renderFormPage({
+    title: "Save Towards Rent",
+    intro: "Create a rent savings goal that PayRent can help you track.",
+    action: "/forms/save-towards-rent",
+    hidden: { wa_id: waId },
+    fields: [
+      inputField("Full Name", "full_name", "text", "", true),
+      inputField("Phone Number", "phone_number", "tel", phoneNumber, true),
+      inputField("Monthly Rent Amount", "monthly_rent_amount", "number", "", true),
+      inputField("Rent Due Day", "rent_due_day", "number", "", true),
+      selectField("Savings Frequency", "savings_frequency", [
+        ["daily", "Daily"],
+        ["weekly", "Weekly"],
+        ["monthly", "Monthly"]
+      ]),
+      inputField("Target Start Date", "target_start_date", "date", "", false)
+    ],
+    submitLabel: "Create savings goal"
+  });
+}
+
+function renderFormPage({ title, intro, action, hidden, fields, submitLabel }) {
+  const hiddenFields = Object.entries(hidden || {})
+    .map(([name, value]) => `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`)
+    .join("");
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(title)} | PayRent Kenya</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f7f4ef;
+      color: #202124;
+    }
+    main {
+      width: min(100%, 520px);
+      margin: 0 auto;
+      padding: 24px 18px 34px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      line-height: 1.1;
+    }
+    p {
+      margin: 0 0 20px;
+      color: #5f6368;
+      line-height: 1.45;
+    }
+    form {
+      display: grid;
+      gap: 14px;
+    }
+    label {
+      display: grid;
+      gap: 6px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    input, select {
+      width: 100%;
+      border: 1px solid #d6d0c7;
+      border-radius: 8px;
+      padding: 13px 12px;
+      font-size: 16px;
+      background: white;
+      color: #202124;
+    }
+    button {
+      margin-top: 8px;
+      border: 0;
+      border-radius: 8px;
+      padding: 14px 16px;
+      font-size: 16px;
+      font-weight: 800;
+      background: #0f7b62;
+      color: white;
+    }
+    .brand {
+      font-weight: 800;
+      color: #0f7b62;
+      margin-bottom: 14px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand">PayRent Kenya</div>
+    <h1>${escapeHtml(title)}</h1>
+    <p>${escapeHtml(intro)}</p>
+    <form method="post" action="${escapeHtml(action)}">
+      ${hiddenFields}
+      ${fields.join("\n")}
+      <button type="submit">${escapeHtml(submitLabel)}</button>
+    </form>
+  </main>
+</body>
+</html>`;
+}
+
+function renderSuccessPage(message) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PayRent Kenya</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f7f4ef;
+      color: #202124;
+    }
+    main {
+      width: min(100%, 520px);
+      margin: 0 auto;
+      padding: 36px 18px;
+    }
+    h1 { margin: 0 0 12px; font-size: 28px; }
+    p { white-space: pre-line; line-height: 1.5; color: #3c4043; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Done ❤️</h1>
+    <p>${escapeHtml(message)}</p>
+  </main>
+</body>
+</html>`;
+}
+
+function inputField(label, name, type, value, required) {
+  return `<label>${escapeHtml(label)}
+    <input type="${escapeHtml(type)}" name="${escapeHtml(name)}" value="${escapeHtml(value)}" ${required ? "required" : ""}>
+  </label>`;
+}
+
+function selectField(label, name, options) {
+  return `<label>${escapeHtml(label)}
+    <select name="${escapeHtml(name)}" required>
+      ${options.map(([value, text]) => `<option value="${escapeHtml(value)}">${escapeHtml(text)}</option>`).join("")}
+    </select>
+  </label>`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;");
 }

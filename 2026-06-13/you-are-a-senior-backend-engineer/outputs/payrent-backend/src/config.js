@@ -7,7 +7,8 @@ export function getConfig() {
     twilioAuthToken: process.env.TWILIO_AUTH_TOKEN,
     twilioAccountSid: process.env.TWILIO_ACCOUNT_SID,
     twilioWhatsAppFrom: process.env.TWILIO_WHATSAPP_FROM,
-    twilioFlowContentSids: parseJsonEnv(process.env.TWILIO_FLOW_CONTENT_SIDS, {})
+    twilioFlowContentSids: parseJsonEnv(process.env.TWILIO_FLOW_CONTENT_SIDS, {}),
+    publicBaseUrl: process.env.PUBLIC_BASE_URL
   };
 
   const missing = [];

@@ -37,6 +37,7 @@ PORT=3000
 SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 API_SECRET=change-me
+PUBLIC_BASE_URL=https://your-railway-domain.up.railway.app
 TWILIO_AUTH_TOKEN=your-twilio-auth-token
 TWILIO_ACCOUNT_SID=your-twilio-account-sid
 TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
@@ -266,7 +267,16 @@ Reply:
 
 The backend will request the `save_towards_rent` WhatsApp Flow using the `TWILIO_FLOW_CONTENT_SIDS.save_towards_rent` value.
 
-If the Twilio Sandbox cannot launch WhatsApp Flows yet, use chat fallback.
+If the Twilio Sandbox cannot launch WhatsApp Flows yet, use the in-app browser forms or chat fallback.
+
+The WhatsApp menu includes web form links that open in WhatsApp's in-app browser:
+
+```text
+https://your-railway-domain/forms/tenant-registration
+https://your-railway-domain/forms/save-towards-rent
+```
+
+These forms are hosted by the same Railway backend and submit directly to Supabase through the existing Flow processor.
 
 Tenant fallback:
 

@@ -702,13 +702,13 @@ export class PayRentService {
     });
   }
 
-  async createOrUpdateMenuSession({ phoneNumber, waId, selectedOption, selectedUserType, currentStep = "choose_user_type" }) {
+  async createOrUpdateMenuSession({ phoneNumber, waId, selectedOption, selectedUserType, currentStep = "choose_user_type", data }) {
     const existing = await this.db.select("onboarding_sessions", {
       query: `?phone_number=${eq(phoneNumber)}&status=eq.active&select=*&order=created_at.desc&limit=1`,
       single: true
     });
 
-    const data = {
+    const sessionData = data || {
       selected_option: selectedOption || null,
       selected_user_type: selectedUserType || null
     };
@@ -719,7 +719,7 @@ export class PayRentService {
         selected_option: selectedOption || existing.selected_option || null,
         selected_user_type: selectedUserType || existing.selected_user_type || null,
         current_step: currentStep,
-        data,
+        data: data || existing.data || sessionData,
         expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString()
       }, `?id=${eq(existing.id)}`);
     }
@@ -732,8 +732,26 @@ export class PayRentService {
       current_step: currentStep,
       selected_option: selectedOption || null,
       selected_user_type: selectedUserType || null,
-      data
+      data: sessionData
     });
+  }
+
+  async getActiveOnboardingSession(phoneNumber) {
+    return this.db.select("onboarding_sessions", {
+      query: `?phone_number=${eq(phoneNumber)}&status=eq.active&select=*&order=created_at.desc&limit=1`,
+      single: true
+    });
+  }
+
+  async updateOnboardingSession({ id, currentStep, data, selectedOption, selectedUserType, status = "active" }) {
+    return this.db.update("onboarding_sessions", {
+      current_step: currentStep,
+      data: data || {},
+      selected_option: selectedOption || null,
+      selected_user_type: selectedUserType || null,
+      status,
+      expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString()
+    }, `?id=${eq(id)}`);
   }
 }
 
