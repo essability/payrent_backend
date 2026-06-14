@@ -785,9 +785,10 @@ export class PayRentService {
     });
   }
 
-  async createOrUpdateMenuSession({ phoneNumber, waId, selectedOption, selectedUserType, currentStep = "choose_user_type", data }) {
+  async createOrUpdateMenuSession({ phoneNumber, waId, externalUserId, selectedOption, selectedUserType, currentStep = "choose_user_type", data }) {
+    const sessionExternalUserId = externalUserId || waId || phoneNumber;
     const existing = await this.db.select("onboarding_sessions", {
-      query: `?phone_number=${eq(phoneNumber)}&status=eq.active&select=*&order=created_at.desc&limit=1`,
+      query: `?external_user_id=${eq(sessionExternalUserId)}&status=eq.active&select=*&order=created_at.desc&limit=1`,
       single: true
     });
 
@@ -798,78 +799,94 @@ export class PayRentService {
 
     if (existing) {
       return this.db.update("onboarding_sessions", {
-        wa_id: waId || existing.wa_id || null,
-        selected_option: selectedOption || existing.selected_option || null,
-        selected_user_type: selectedUserType || existing.selected_user_type || null,
+        external_user_id: sessionExternalUserId,
+        flow_type: selectedUserType || existing.flow_type || existing.data?.flow_type || null,
         current_step: currentStep,
         data: data || existing.data || sessionData,
+        status: "active",
         expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString()
       }, `?id=${eq(existing.id)}`);
     }
 
     return this.db.insert("onboarding_sessions", {
+      external_user_id: sessionExternalUserId,
       phone_number: phoneNumber,
-      wa_id: waId || null,
       flow: "independent_tenant",
+      flow_type: selectedUserType || null,
       status: "active",
       current_step: currentStep,
-      selected_option: selectedOption || null,
-      selected_user_type: selectedUserType || null,
       data: sessionData
     });
   }
 
-  async getActiveOnboardingSession(phoneNumber) {
+  async getActiveOnboardingSession(externalUserId) {
     return this.db.select("onboarding_sessions", {
-      query: `?phone_number=${eq(phoneNumber)}&status=eq.active&select=*&order=created_at.desc&limit=1`,
+      query: `?external_user_id=${eq(externalUserId)}&status=eq.active&select=*&order=created_at.desc&limit=1`,
       single: true
     });
   }
 
-  async startOnboardingFlow({ phoneNumber, waId, flowType, selectedOption, step = "full_name", data = {} }) {
-    const existing = await this.getActiveOnboardingSession(phoneNumber);
+  async getOnboardingSessionById(id) {
+    return this.db.select("onboarding_sessions", {
+      query: `?id=${eq(id)}&select=*`,
+      single: true
+    });
+  }
+
+  async startOnboardingFlow({ phoneNumber, waId, externalUserId, flowType, selectedOption, step = "full_name", data = {} }) {
+    const sessionExternalUserId = externalUserId || waId || phoneNumber;
+    const existing = await this.getActiveOnboardingSession(sessionExternalUserId);
     const sessionData = {
       ...data,
       flow_type: flowType,
       step
     };
+    const payload = {
+      external_user_id: sessionExternalUserId,
+      flow: onboardingFlowForType(flowType),
+      flow_type: flowType,
+      current_step: step,
+      data: sessionData,
+      status: "active",
+      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+    };
 
     if (existing) {
-      return this.db.update("onboarding_sessions", {
-        wa_id: waId || existing.wa_id || null,
-        flow: onboardingFlowForType(flowType),
-        selected_option: selectedOption,
-        selected_user_type: flowType,
-        current_step: step,
-        data: sessionData,
-        status: "active",
-        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-      }, `?id=${eq(existing.id)}`);
+      return this.updateOnboardingRow({
+        id: existing.id,
+        payload
+      });
     }
 
-    return this.db.insert("onboarding_sessions", {
-      phone_number: phoneNumber,
-      wa_id: waId || null,
-      flow: onboardingFlowForType(flowType),
-      status: "active",
-      current_step: step,
-      selected_option: selectedOption,
-      selected_user_type: flowType,
-      data: sessionData,
-      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+    return this.insertOnboardingRow({
+      payload: {
+        ...payload,
+        phone_number: phoneNumber
+      }
     });
   }
 
   async advanceOnboardingFlow({ session, step, data, status = "active" }) {
-    return this.db.update("onboarding_sessions", {
+    const flowType = data?.flow_type || session.flow_type || session.data?.flow_type || null;
+    const payload = {
+      flow_type: flowType,
       current_step: step,
       data: {
         ...(data || {}),
+        flow_type: flowType,
         step
       },
       status,
       expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-    }, `?id=${eq(session.id)}`);
+    };
+
+    console.log("Updated data", payload.data);
+    console.log("Next step", step);
+
+    return this.updateOnboardingRow({
+      id: session.id,
+      payload
+    });
   }
 
   async cancelOnboardingFlow(session) {
@@ -932,20 +949,44 @@ export class PayRentService {
   }
 
   async updateOnboardingSession({ id, currentStep, data, selectedOption, selectedUserType, status = "active", nativeFlowAttempted, nativeFlowContentSid, fallbackChatActive }) {
+    const flowType = data?.flow_type || selectedUserType || null;
     const payload = {
       current_step: currentStep,
-      data: data || {},
-      selected_option: selectedOption || null,
-      selected_user_type: selectedUserType || null,
+      flow_type: flowType,
+      data: {
+        ...(data || {}),
+        ...(flowType ? { flow_type: flowType } : {})
+      },
       status,
       expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString()
     };
 
-    if (nativeFlowAttempted !== undefined) payload.native_flow_attempted = nativeFlowAttempted;
-    if (nativeFlowContentSid !== undefined) payload.native_flow_content_sid = nativeFlowContentSid;
-    if (fallbackChatActive !== undefined) payload.fallback_chat_active = fallbackChatActive;
+    return this.updateOnboardingRow({ id, payload });
+  }
 
-    return this.db.update("onboarding_sessions", payload, `?id=${eq(id)}`);
+  async insertOnboardingRow({ payload }) {
+    try {
+      return await this.db.insert("onboarding_sessions", payload);
+    } catch (error) {
+      console.error("Supabase onboarding insert failed:", {
+        payload,
+        error
+      });
+      throw error;
+    }
+  }
+
+  async updateOnboardingRow({ id, payload }) {
+    try {
+      return await this.db.update("onboarding_sessions", payload, `?id=${eq(id)}`);
+    } catch (error) {
+      console.error("Supabase onboarding update failed:", {
+        id,
+        payload,
+        error
+      });
+      throw error;
+    }
   }
 }
 

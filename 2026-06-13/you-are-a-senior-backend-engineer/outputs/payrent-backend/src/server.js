@@ -273,37 +273,71 @@ server.listen(config.port, () => {
 
 async function handlePrimaryWhatsAppWebhook({ req, res, preloadedForm }) {
   try {
-    console.log("Step 1");
     const form = preloadedForm || await readForm(req);
-    console.log("Incoming Twilio WhatsApp webhook:", form);
-
-    console.log("Step 2");
-    const phoneNumber = normalizeWhatsAppPhone(form.From);
-    const waId = form.WaId || phoneNumber;
-    const profileName = form.ProfileName || "there";
-    const message = form.Body || "";
-    const decision = await decidePayRentWelcomeReply({
-      message,
-      phoneNumber,
-      profileName,
+    const result = await handleIncomingWhatsAppMessage({
+      payload: form,
       formBaseUrl: publicBaseUrlFromRequest(req)
     });
 
-    console.log("Step 3");
-    sendText(res, 200, twiml(decision.reply), "text/xml; charset=utf-8");
+    sendText(res, 200, twiml(result.reply), "text/xml; charset=utf-8");
 
-    handleWhatsAppWebhookInBackground({
-      phoneNumber,
-      waId,
-      profileName,
-      incomingMessage: message,
-      outgoingMessage: decision.reply,
-      decision
-    });
+    handleWhatsAppPostReplyTasks(result);
   } catch (error) {
     console.error("Webhook Error:", error);
     sendText(res, 200, twiml(WELCOME_MENU), "text/xml; charset=utf-8");
   }
+}
+
+async function handleIncomingWhatsAppMessage({ payload, formBaseUrl }) {
+  console.log("Incoming Twilio WhatsApp webhook:", payload);
+  console.log("Incoming From", payload.From);
+  console.log("Incoming WaId", payload.WaId);
+
+  const phoneNumber = normalizeWhatsAppPhone(payload.From);
+  const waId = payload.WaId || "";
+  const externalUserId = resolveExternalUserId(payload);
+  const profileName = payload.ProfileName || "there";
+  const message = payload.Body || "";
+
+  console.log("Resolved external_user_id", externalUserId);
+
+  await safeSaveMessage({
+    phoneNumber,
+    direction: "user",
+    body: message,
+    channel: "whatsapp"
+  });
+
+  const activeSession = await getActiveSessionForDecision(externalUserId);
+  console.log("Loaded session", activeSession);
+
+  const decision = await decidePayRentWelcomeReply({
+    message,
+    phoneNumber,
+    waId,
+    externalUserId,
+    profileName,
+    formBaseUrl,
+    activeSession
+  });
+
+  await safeSaveMessage({
+    phoneNumber,
+    direction: "assistant",
+    body: decision.reply,
+    channel: "whatsapp"
+  });
+
+  return {
+    phoneNumber,
+    waId,
+    externalUserId,
+    profileName,
+    incomingMessage: message,
+    outgoingMessage: decision.reply,
+    reply: decision.reply,
+    decision
+  };
 }
 
 function publicUrlFromRequest(req, url) {
@@ -319,19 +353,44 @@ function publicBaseUrlFromRequest(req) {
   return `${proto}://${host}`;
 }
 
-async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, formBaseUrl }) {
+async function decidePayRentWelcomeReply({ message, phoneNumber, waId, externalUserId, profileName, formBaseUrl, activeSession }) {
   const text = String(message || "").trim();
   const normalized = text.toLowerCase();
   const tenantFormUrl = buildFormUrl(formBaseUrl, "/forms/tenant-registration", phoneNumber);
   const saveFormUrl = buildFormUrl(formBaseUrl, "/forms/save-towards-rent", phoneNumber);
 
-  const activeSession = await getActiveSessionForDecision(phoneNumber);
-  console.log("Loaded session", activeSession);
-
   if (normalized === "cancel" && activeSession) {
     await service.cancelOnboardingFlow(activeSession);
     return {
       reply: `${WELCOME_MENU}`,
+      selectedOption: null,
+      selectedUserType: null,
+      skipSessionUpdate: true
+    };
+  }
+
+  if (normalized === "help") {
+    return {
+      reply: "PayRent helps you register, save towards rent, receive reminders, and manage rent from WhatsApp. Reply MENU to see options or CANCEL to stop the current flow.",
+      selectedOption: null,
+      selectedUserType: null,
+      skipSessionUpdate: true
+    };
+  }
+
+  if (normalized === "status") {
+    if (activeSession) {
+      const step = normalizeOnboardingStep(activeSession.data?.step || activeSession.current_step);
+      return {
+        reply: `You are currently on step: ${step}. Please answer the last question, or reply MENU to restart.`,
+        selectedOption: null,
+        selectedUserType: activeSession.flow_type || activeSession.data?.flow_type,
+        skipSessionUpdate: true
+      };
+    }
+
+    return {
+      reply: "You do not have an active onboarding flow. Reply MENU to start.",
       selectedOption: null,
       selectedUserType: null,
       skipSessionUpdate: true
@@ -382,7 +441,8 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, fo
   if (normalized === "1") {
     const session = await service.startOnboardingFlow({
       phoneNumber,
-      waId: phoneNumber,
+      waId,
+      externalUserId,
       flowType: "tenant",
       selectedOption: "1",
       step: "full_name",
@@ -414,6 +474,7 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, fo
       flowName: "tenant_registration",
       currentStep: "full_name",
       sessionData: session.data,
+      sessionId: session.id,
       skipSessionUpdate: true
     };
   }
@@ -421,7 +482,8 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, fo
   if (normalized === "4") {
     const session = await service.startOnboardingFlow({
       phoneNumber,
-      waId: phoneNumber,
+      waId,
+      externalUserId,
       flowType: "save_towards_rent",
       selectedOption: "4",
       step: "full_name",
@@ -453,6 +515,7 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, fo
       flowName: "save_towards_rent",
       currentStep: "full_name",
       sessionData: session.data,
+      sessionId: session.id,
       skipSessionUpdate: true
     };
   }
@@ -460,7 +523,8 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, fo
   if (normalized === "2") {
     const session = await service.startOnboardingFlow({
       phoneNumber,
-      waId: phoneNumber,
+      waId,
+      externalUserId,
       flowType: "landlord",
       selectedOption: "2",
       step: "full_name",
@@ -486,6 +550,7 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, fo
       selectedUserType: "landlord",
       currentStep: "full_name",
       sessionData: session.data,
+      sessionId: session.id,
       skipSessionUpdate: true
     };
   }
@@ -493,7 +558,8 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, fo
   if (normalized === "3") {
     const session = await service.startOnboardingFlow({
       phoneNumber,
-      waId: phoneNumber,
+      waId,
+      externalUserId,
       flowType: "property_manager",
       selectedOption: "3",
       step: "full_name",
@@ -519,6 +585,7 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, fo
       selectedUserType: "property_manager",
       currentStep: "full_name",
       sessionData: session.data,
+      sessionId: session.id,
       skipSessionUpdate: true
     };
   }
@@ -610,9 +677,28 @@ function buildFormUrl(baseUrl, pathname, phoneNumber) {
   return url.toString();
 }
 
-async function getActiveSessionForDecision(phoneNumber) {
+function resolveExternalUserId(payload) {
+  const waId = String(payload?.WaId || "").trim();
+  if (waId) return waId;
+  return normalizeWhatsAppPhone(payload?.From);
+}
+
+async function safeSaveMessage({ phoneNumber, direction, body, channel }) {
   try {
-    return await service.getActiveOnboardingSession(phoneNumber);
+    await service.saveMessage({ phoneNumber, direction, body, channel });
+  } catch (error) {
+    console.error("Message Save Error:", {
+      direction,
+      phoneNumber,
+      body,
+      error
+    });
+  }
+}
+
+async function getActiveSessionForDecision(externalUserId) {
+  try {
+    return await service.getActiveOnboardingSession(externalUserId);
   } catch (error) {
     console.error("Onboarding Session Lookup Error:", error);
     return null;
@@ -621,12 +707,12 @@ async function getActiveSessionForDecision(phoneNumber) {
 
 async function continueFlow(session, message) {
   const data = session.data || {};
-  const flowType = data.flow_type || session.selected_user_type;
+  const flowType = session.flow_type || data.flow_type;
   const step = normalizeOnboardingStep(data.step || session.current_step);
 
-  console.log("Current flow", flowType);
+  console.log("Current flow_type", flowType);
   console.log("Current step", step);
-  console.log("Incoming answer", message);
+  console.log("User answer", message);
 
   if (flowType === "tenant") {
     return continueTenantFlow(session, data, step, message);
@@ -854,7 +940,7 @@ async function continuePropertyManagerFlow(session, data, step, message) {
 function isRealActiveFlowSession(session) {
   if (!session || session.status !== "active") return false;
   const data = session.data || {};
-  const flowType = data.flow_type || session.selected_user_type;
+  const flowType = session.flow_type || data.flow_type;
   const step = normalizeOnboardingStep(data.step || session.current_step);
 
   return Boolean(
@@ -931,45 +1017,10 @@ async function continueSaveTowardsRentFlow(session, data, step, message) {
   return { reply: "Please reply MENU to restart or CANCEL to stop.", skipSessionUpdate: true };
 }
 
-function handleWhatsAppWebhookInBackground({ phoneNumber, waId, profileName, incomingMessage, outgoingMessage, decision }) {
+function handleWhatsAppPostReplyTasks({ phoneNumber, profileName, decision }) {
   setImmediate(async () => {
     try {
-      console.log("WhatsApp background processing start");
-      await service.saveMessage({
-        phoneNumber,
-        direction: "user",
-        body: incomingMessage,
-        channel: "whatsapp"
-      });
-      await service.saveMessage({
-        phoneNumber,
-        direction: "assistant",
-        body: outgoingMessage,
-        channel: "whatsapp"
-      });
-      let activeSession = null;
-      if (!decision.skipSessionUpdate) {
-        await service.createOrUpdateMenuSession({
-          phoneNumber,
-          waId,
-          selectedOption: decision.selectedOption,
-          selectedUserType: decision.selectedUserType,
-          currentStep: decision.currentStep || (decision.flowName ? "flow_launch_requested" : "choose_user_type")
-        });
-        activeSession = await service.getActiveOnboardingSession(phoneNumber);
-        if (activeSession && decision.sessionData) {
-          await service.updateOnboardingSession({
-            id: activeSession.id,
-            currentStep: decision.currentStep || activeSession.current_step,
-            data: decision.sessionData,
-            selectedOption: decision.selectedOption,
-            selectedUserType: decision.selectedUserType,
-            status: decision.completeSession ? "completed" : "active"
-          });
-        }
-      } else {
-        activeSession = await service.getActiveOnboardingSession(phoneNumber);
-      }
+      console.log("WhatsApp post-reply tasks start");
 
       if (decision.fallbackFlowName && decision.fallbackPayload) {
         await processFallbackSubmission({
@@ -985,11 +1036,11 @@ function handleWhatsAppWebhookInBackground({ phoneNumber, waId, profileName, inc
           flowName: decision.flowName,
           profileName,
           phoneNumber,
-          sessionId: activeSession?.id
+          sessionId: decision.sessionId
         });
       }
 
-      console.log("WhatsApp background processing complete");
+      console.log("WhatsApp post-reply tasks complete");
     } catch (error) {
       console.error("Webhook Error:", error);
     }
@@ -1051,7 +1102,7 @@ async function launchWhatsAppFlowInBackground({ to, flowName, profileName, phone
       channel: "whatsapp"
     });
     if (sessionId) {
-      const session = await service.getActiveOnboardingSession(phoneNumber);
+      const session = await service.getOnboardingSessionById(sessionId);
       await service.updateOnboardingSession({
         id: sessionId,
         currentStep: session?.current_step || "full_name",
@@ -1071,7 +1122,7 @@ async function launchWhatsAppFlowInBackground({ to, flowName, profileName, phone
     console.error("Flow Launch Error:", error);
     if (sessionId) {
       try {
-        const session = await service.getActiveOnboardingSession(phoneNumber);
+        const session = await service.getOnboardingSessionById(sessionId);
         const selectedUserType = flowName === "tenant_registration" ? "tenant" : "save_towards_rent";
         await service.updateOnboardingSession({
           id: sessionId,
