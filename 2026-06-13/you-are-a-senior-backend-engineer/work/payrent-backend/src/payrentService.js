@@ -645,6 +645,23 @@ export class PayRentService {
     return { tenant, notification };
   }
 
+  async createSupportRequest({ phoneNumber, message }) {
+    const user = await this.findUserByPhone(phoneNumber);
+    const notification = await this.db.insert("notifications", {
+      user_id: user.id,
+      channel: "whatsapp",
+      status: "pending",
+      title: "WhatsApp support request",
+      body: message,
+      metadata: {
+        type: "support_request",
+        source: "whatsapp_chat"
+      }
+    });
+
+    return { user, notification };
+  }
+
   async reportMaintenanceIssue({ tenantPhoneNumber, propertyId, unitId, title, description, priority }) {
     const tenant = await this.findUserByPhone(tenantPhoneNumber);
     const issue = await this.db.insert("maintenance_issues", {

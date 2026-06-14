@@ -42,6 +42,19 @@ const WELCOME_MENU = [
   "Reply with 1, 2, 3, or 4."
 ].join("\n");
 
+const TENANT_HOME_MENU = [
+  "What would you like to do next?",
+  "",
+  "1. View my rent goal",
+  "2. Save towards rent",
+  "3. Set transaction PIN",
+  "4. View payment history",
+  "5. Ask PayRent AI",
+  "6. Talk to support",
+  "",
+  "Reply with 1, 2, 3, 4, 5, or 6."
+].join("\n");
+
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
@@ -399,8 +412,28 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, waId, externalU
 
   if (normalized === "menu") {
     if (activeSession) await service.cancelOnboardingFlow(activeSession);
+    const registeredUser = await getRegisteredUserForDecision(phoneNumber);
+    if (registeredUser) {
+      return {
+        reply: buildTenantHomeMenu(registeredUser.full_name),
+        selectedOption: null,
+        selectedUserType: null,
+        skipSessionUpdate: true
+      };
+    }
+
     return {
       reply: WELCOME_MENU,
+      selectedOption: null,
+      selectedUserType: null,
+      skipSessionUpdate: true
+    };
+  }
+
+  if (normalized === "home") {
+    const knownUser = await getRegisteredUserForDecision(phoneNumber);
+    return {
+      reply: knownUser ? buildTenantHomeMenu(knownUser.full_name) : WELCOME_MENU,
       selectedOption: null,
       selectedUserType: null,
       skipSessionUpdate: true
@@ -411,9 +444,11 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, waId, externalU
     return continueFlow(activeSession, text);
   }
 
+  const knownUser = await getRegisteredUserForDecision(phoneNumber);
+
   if (isWelcomeTrigger(normalized)) {
     return {
-      reply: WELCOME_MENU,
+      reply: knownUser ? buildTenantHomeMenu(knownUser.full_name) : WELCOME_MENU,
       selectedOption: null,
       selectedUserType: null,
       skipSessionUpdate: true
@@ -436,6 +471,19 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, waId, externalU
       fallbackPayload: parseColonCsvPayload(text, "save"),
       skipSessionUpdate: true
     };
+  }
+
+  if (knownUser) {
+    const tenantHomeDecision = await handleTenantHomeAction({
+      normalized,
+      text,
+      phoneNumber,
+      waId,
+      externalUserId,
+      profileName,
+      knownUser
+    });
+    if (tenantHomeDecision) return tenantHomeDecision;
   }
 
   if (normalized === "1") {
@@ -608,7 +656,6 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, waId, externalU
     };
   }
 
-  const knownUser = await getKnownUserForDecision(phoneNumber);
   if (!knownUser) {
     return {
       reply: WELCOME_MENU,
@@ -627,13 +674,172 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, waId, externalU
   };
 }
 
-async function getKnownUserForDecision(phoneNumber) {
+async function getRegisteredUserForDecision(phoneNumber) {
   try {
-    return service.findUserByPhone(phoneNumber, { required: false });
+    const context = await service.getAiUserContext(phoneNumber);
+    const name = String(context?.name || "").trim();
+    const roles = context?.roles || [];
+    if (!context?.is_known_user) return null;
+    if (name && name !== "Unknown") return { full_name: name, roles };
+    if (roles.length > 0) return { full_name: name || "there", roles };
+    return null;
   } catch (error) {
-    console.error("Known User Lookup Error:", error);
+    console.error("Registered User Lookup Error:", error);
     return null;
   }
+}
+
+async function handleTenantHomeAction({ normalized, phoneNumber, waId, externalUserId, profileName, knownUser }) {
+  if (normalized === "1" || normalized === "goal" || normalized === "rent goal" || normalized === "balance") {
+    try {
+      const balance = await service.getRentBalance({ tenantPhoneNumber: phoneNumber });
+      return {
+        reply: buildRentGoalSummary(balance, knownUser.full_name),
+        selectedOption: "tenant_goal",
+        selectedUserType: "tenant",
+        skipSessionUpdate: true
+      };
+    } catch (error) {
+      console.error("Rent Goal Summary Error:", error);
+      return {
+        reply: `I could not load your rent goal right now.\n\n${TENANT_HOME_MENU}`,
+        selectedOption: "tenant_goal",
+        selectedUserType: "tenant",
+        skipSessionUpdate: true
+      };
+    }
+  }
+
+  if (normalized === "2" || normalized === "save" || normalized === "savings") {
+    const session = await service.startOnboardingFlow({
+      phoneNumber,
+      waId,
+      externalUserId,
+      flowType: "savings_deposit",
+      selectedOption: "tenant_save",
+      step: "amount",
+      data: {
+        flow_type: "savings_deposit",
+        step: "amount",
+        profile_name: profileName,
+        phone_number: phoneNumber
+      }
+    });
+    console.log("Started session", session);
+    return {
+      reply: "How much do you want to save towards rent today? Example: 1000",
+      selectedOption: "tenant_save",
+      selectedUserType: "tenant",
+      sessionId: session.id,
+      skipSessionUpdate: true
+    };
+  }
+
+  if (normalized === "3" || normalized === "pin" || normalized === "set pin") {
+    const session = await service.startOnboardingFlow({
+      phoneNumber,
+      waId,
+      externalUserId,
+      flowType: "set_pin",
+      selectedOption: "tenant_pin",
+      step: "pin",
+      data: {
+        flow_type: "set_pin",
+        step: "pin",
+        profile_name: profileName,
+        phone_number: phoneNumber
+      }
+    });
+    console.log("Started session", session);
+    return {
+      reply: "Please set a 4 to 6 digit transaction PIN.",
+      selectedOption: "tenant_pin",
+      selectedUserType: "tenant",
+      sessionId: session.id,
+      skipSessionUpdate: true
+    };
+  }
+
+  if (normalized === "4" || normalized === "history" || normalized === "payments") {
+    try {
+      const history = await service.getPaymentHistory({ tenantPhoneNumber: phoneNumber, limit: 5 });
+      return {
+        reply: buildPaymentHistory(history),
+        selectedOption: "tenant_history",
+        selectedUserType: "tenant",
+        skipSessionUpdate: true
+      };
+    } catch (error) {
+      console.error("Payment History Error:", error);
+      return {
+        reply: `I could not load your payment history right now.\n\n${TENANT_HOME_MENU}`,
+        selectedOption: "tenant_history",
+        selectedUserType: "tenant",
+        skipSessionUpdate: true
+      };
+    }
+  }
+
+  if (normalized === "5" || normalized === "ai" || normalized === "ask ai") {
+    const session = await service.startOnboardingFlow({
+      phoneNumber,
+      waId,
+      externalUserId,
+      flowType: "ai_question",
+      selectedOption: "tenant_ai",
+      step: "question",
+      data: {
+        flow_type: "ai_question",
+        step: "question",
+        profile_name: profileName,
+        phone_number: phoneNumber
+      }
+    });
+    console.log("Started session", session);
+    return {
+      reply: "Ask me anything about PayRent, rent savings, reminders, or your account.",
+      selectedOption: "tenant_ai",
+      selectedUserType: "tenant",
+      sessionId: session.id,
+      skipSessionUpdate: true
+    };
+  }
+
+  if (normalized === "6" || normalized === "support" || normalized === "help me") {
+    const session = await service.startOnboardingFlow({
+      phoneNumber,
+      waId,
+      externalUserId,
+      flowType: "support_request",
+      selectedOption: "tenant_support",
+      step: "message",
+      data: {
+        flow_type: "support_request",
+        step: "message",
+        profile_name: profileName,
+        phone_number: phoneNumber
+      }
+    });
+    console.log("Started session", session);
+    return {
+      reply: "Please tell us what you need help with. Ruth’s PayRent team will review it.",
+      selectedOption: "tenant_support",
+      selectedUserType: "tenant",
+      sessionId: session.id,
+      skipSessionUpdate: true
+    };
+  }
+
+  return null;
+}
+
+function buildTenantHomeMenu(fullName) {
+  const name = String(fullName || "").trim();
+  return [
+    name && name !== "Unknown" ? `Welcome back, ${name} ❤️` : "Welcome back to PayRent ❤️",
+    "",
+    TENANT_HOME_MENU
+  ].join("\n");
 }
 
 function isWelcomeTrigger(normalized) {
@@ -730,6 +936,22 @@ async function continueFlow(session, message) {
     return continuePropertyManagerFlow(session, data, step, message);
   }
 
+  if (flowType === "set_pin") {
+    return continueSetPinFlow(session, data, step, message);
+  }
+
+  if (flowType === "savings_deposit") {
+    return continueSavingsDepositFlow(session, data, step, message);
+  }
+
+  if (flowType === "ai_question") {
+    return continueAiQuestionFlow(session, data, step, message);
+  }
+
+  if (flowType === "support_request") {
+    return continueSupportRequestFlow(session, data, step, message);
+  }
+
   console.log("Next step", "choose_user_type");
   return { reply: WELCOME_MENU, skipSessionUpdate: true };
 }
@@ -787,18 +1009,188 @@ async function continueTenantFlow(session, data, step, message) {
       full_name: data.full_name || data.profile_name || "WhatsApp User",
       flow_name: "tenant_registration"
     };
+    try {
+      await flowProcessor.process({
+        flowName: "tenant_registration",
+        source: "whatsapp_chat_fallback",
+        phoneNumber: payload.phone_number,
+        payload
+      });
+    } catch (error) {
+      console.error("Tenant Completion Save Error:", error);
+      return {
+        reply: "I received your details, but I could not complete registration right now. Please try again in a moment.",
+        skipSessionUpdate: true
+      };
+    }
     await service.advanceOnboardingFlow({ session, step: "complete", data: { ...payload, step: "complete" }, status: "completed" });
     console.log("Next step", "complete");
     return {
-      reply: "Registration complete. Beautiful ❤️ We’re creating your PayRent tenant profile now.",
-      fallbackFlowName: "tenant_registration",
-      fallbackPayload: payload,
+      reply: [
+        "Registration complete. Beautiful ❤️",
+        "We’re creating your PayRent tenant profile now.",
+        "",
+        TENANT_HOME_MENU
+      ].join("\n"),
       completeSession: true,
       skipSessionUpdate: true
     };
   }
 
   console.log("Next step", "unknown");
+  return { reply: "Please reply MENU to restart or CANCEL to stop.", skipSessionUpdate: true };
+}
+
+async function continueSetPinFlow(session, data, step, message) {
+  if (step === "pin") {
+    if (!/^\d{4,6}$/.test(String(message || ""))) {
+      return { reply: "Please enter a 4 to 6 digit PIN.", skipSessionUpdate: true };
+    }
+
+    const nextData = { ...data, pin: message, step: "confirm_pin" };
+    await service.advanceOnboardingFlow({ session, step: "confirm_pin", data: nextData });
+    return { reply: "Please confirm your transaction PIN.", skipSessionUpdate: true };
+  }
+
+  if (step === "confirm_pin") {
+    if (message !== data.pin) {
+      const nextData = { ...data, pin: null, step: "pin" };
+      await service.advanceOnboardingFlow({ session, step: "pin", data: nextData });
+      return { reply: "The PINs did not match. Please enter a new 4 to 6 digit PIN.", skipSessionUpdate: true };
+    }
+
+    try {
+      await service.setTransactionPin({
+        phoneNumber: data.phone_number || session.phone_number,
+        pin: message
+      });
+      await service.advanceOnboardingFlow({
+        session,
+        step: "complete",
+        data: { ...data, pin: null, step: "complete" },
+        status: "completed"
+      });
+
+      return {
+        reply: [
+          "Your transaction PIN has been set securely ❤️",
+          "",
+          TENANT_HOME_MENU
+        ].join("\n"),
+        skipSessionUpdate: true
+      };
+    } catch (error) {
+      console.error("Set PIN Error:", error);
+      return { reply: "I could not set your PIN right now. Please reply 3 from the menu and try again.", skipSessionUpdate: true };
+    }
+  }
+
+  return { reply: "Please reply MENU to restart or CANCEL to stop.", skipSessionUpdate: true };
+}
+
+async function continueSavingsDepositFlow(session, data, step, message) {
+  if (step === "amount") {
+    const amount = parseMoneyAmount(message);
+    if (!amount) return { reply: "Please enter the amount as a number. Example: 1000", skipSessionUpdate: true };
+
+    const nextData = { ...data, amount, step: "pin" };
+    await service.advanceOnboardingFlow({ session, step: "pin", data: nextData });
+    return { reply: "Please enter your transaction PIN to confirm this rent saving.", skipSessionUpdate: true };
+  }
+
+  if (step === "pin") {
+    try {
+      const result = await service.recordSavingsDeposit({
+        tenantPhoneNumber: data.phone_number || session.phone_number,
+        amount: Number(data.amount),
+        method: "mpesa",
+        providerReference: null,
+        transactionPin: message,
+        metadata: {
+          source: "whatsapp_chat",
+          type: "rent_savings"
+        }
+      });
+      await service.advanceOnboardingFlow({
+        session,
+        step: "complete",
+        data: { ...data, step: "complete" },
+        status: "completed"
+      });
+
+      return {
+        reply: [
+          `Beautiful ❤️ You have saved KES ${formatKes(data.amount)} towards rent.`,
+          "",
+          buildRentGoalProgress(result.rentGoal),
+          "",
+          TENANT_HOME_MENU
+        ].join("\n"),
+        skipSessionUpdate: true
+      };
+    } catch (error) {
+      console.error("Savings Deposit Error:", error);
+      const messageText = /PIN/i.test(error.message || "")
+        ? "That PIN could not be verified. Please reply 3 to set your PIN or try saving again."
+        : "I could not record that saving right now. Please try again in a moment.";
+      return { reply: `${messageText}\n\n${TENANT_HOME_MENU}`, skipSessionUpdate: true };
+    }
+  }
+
+  return { reply: "Please reply MENU to restart or CANCEL to stop.", skipSessionUpdate: true };
+}
+
+async function continueAiQuestionFlow(session, data, step, message) {
+  if (step === "question") {
+    const phoneNumber = data.phone_number || session.phone_number;
+    const reply = await generateAiReplyForWhatsApp({ phoneNumber, userMessage: message });
+    await service.advanceOnboardingFlow({
+      session,
+      step: "complete",
+      data: { ...data, question: message, step: "complete" },
+      status: "completed"
+    });
+    return {
+      reply: [
+        reply,
+        "",
+        "Reply 5 to ask another question, or MENU for options."
+      ].join("\n"),
+      skipSessionUpdate: true
+    };
+  }
+
+  return { reply: "Please reply MENU to restart or CANCEL to stop.", skipSessionUpdate: true };
+}
+
+async function continueSupportRequestFlow(session, data, step, message) {
+  if (step === "message") {
+    try {
+      await service.createSupportRequest({
+        phoneNumber: data.phone_number || session.phone_number,
+        message
+      });
+      await service.advanceOnboardingFlow({
+        session,
+        step: "complete",
+        data: { ...data, support_message: message, step: "complete" },
+        status: "completed"
+      });
+      return {
+        reply: [
+          "Thank you ❤️ Your support request has been received.",
+          "The PayRent team will review it and follow up.",
+          "",
+          TENANT_HOME_MENU
+        ].join("\n"),
+        skipSessionUpdate: true
+      };
+    } catch (error) {
+      console.error("Support Request Error:", error);
+      return { reply: `I could not save your support request right now.\n\n${TENANT_HOME_MENU}`, skipSessionUpdate: true };
+    }
+  }
+
   return { reply: "Please reply MENU to restart or CANCEL to stop.", skipSessionUpdate: true };
 }
 
@@ -965,6 +1357,82 @@ function normalizeOnboardingStep(step) {
   return aliases[normalized] || normalized;
 }
 
+function buildRentGoalSummary(balance, fullName) {
+  const goal = balance.activeGoal;
+  if (!goal) {
+    return [
+      `Hi ${fullName || "there"} ❤️`,
+      "",
+      "I could not find an active rent goal yet.",
+      "Reply 4 from the main menu to create a Save Towards Rent goal.",
+      "",
+      TENANT_HOME_MENU
+    ].join("\n");
+  }
+
+  const rent = Number(goal.monthly_rent_amount || 0);
+  const saved = Number(goal.amount_saved || 0);
+  const remaining = Math.max(rent - saved, 0);
+  return [
+    `Hi ${fullName || "there"} ❤️`,
+    "",
+    "Here is your rent goal:",
+    `Monthly rent: KES ${formatKes(rent)}`,
+    `Saved so far: KES ${formatKes(saved)}`,
+    `Remaining: KES ${formatKes(remaining)}`,
+    `Rent due day: ${goal.rent_due_day || "Not set"}`,
+    "",
+    remaining === 0 ? "You have reached your rent goal. Beautiful work." : "Reply 2 to save towards rent.",
+    "",
+    TENANT_HOME_MENU
+  ].join("\n");
+}
+
+function buildRentGoalProgress(goal) {
+  if (!goal) return "Your saving has been recorded.";
+  const rent = Number(goal.monthly_rent_amount || 0);
+  const saved = Number(goal.amount_saved || 0);
+  const remaining = Math.max(rent - saved, 0);
+  return `Saved so far: KES ${formatKes(saved)}\nRemaining: KES ${formatKes(remaining)}`;
+}
+
+function buildPaymentHistory({ payments }) {
+  if (!payments || payments.length === 0) {
+    return [
+      "You do not have any PayRent payments or savings yet.",
+      "",
+      "Reply 2 to save towards rent.",
+      "",
+      TENANT_HOME_MENU
+    ].join("\n");
+  }
+
+  const lines = payments.slice(0, 5).map((payment, index) => {
+    const date = payment.paid_at || payment.created_at || "";
+    const shortDate = date ? new Date(date).toISOString().slice(0, 10) : "Pending date";
+    return `${index + 1}. KES ${formatKes(payment.amount)} - ${payment.status || "recorded"} - ${shortDate}`;
+  });
+
+  return [
+    "Your recent PayRent history:",
+    "",
+    ...lines,
+    "",
+    TENANT_HOME_MENU
+  ].join("\n");
+}
+
+function parseMoneyAmount(value) {
+  const amount = Number(String(value || "").replace(/[^\d.]/g, ""));
+  return Number.isFinite(amount) && amount > 0 ? amount : null;
+}
+
+function formatKes(value) {
+  return Number(value || 0).toLocaleString("en-KE", {
+    maximumFractionDigits: 0
+  });
+}
+
 async function continueSaveTowardsRentFlow(session, data, step, message) {
   if (step === "full_name") {
     const nextData = { ...data, full_name: message, step: "id_number" };
@@ -1002,12 +1470,29 @@ async function continueSaveTowardsRentFlow(session, data, step, message) {
       full_name: data.full_name || data.profile_name || "WhatsApp User",
       flow_name: "save_towards_rent"
     };
+    try {
+      await flowProcessor.process({
+        flowName: "save_towards_rent",
+        source: "whatsapp_chat_fallback",
+        phoneNumber: payload.phone_number,
+        payload
+      });
+    } catch (error) {
+      console.error("Save Towards Rent Completion Error:", error);
+      return {
+        reply: "I received your details, but I could not create your rent savings goal right now. Please try again in a moment.",
+        skipSessionUpdate: true
+      };
+    }
     await service.advanceOnboardingFlow({ session, step: "complete", data: { ...payload, step: "complete" }, status: "completed" });
     console.log("Next step", "complete");
     return {
-      reply: "Registration complete. Beautiful ❤️ We’re creating your rent savings goal now.",
-      fallbackFlowName: "save_towards_rent",
-      fallbackPayload: payload,
+      reply: [
+        "Registration complete. Beautiful ❤️",
+        "We’re creating your rent savings goal now.",
+        "",
+        TENANT_HOME_MENU
+      ].join("\n"),
       completeSession: true,
       skipSessionUpdate: true
     };
