@@ -60,6 +60,7 @@ export class FlowProcessor {
         fullName: required(payload.full_name, "full_name"),
         phoneNumber: required(payload.phone_number, "phone_number"),
         email: payload.email || null,
+        nationalIdNumber: payload.national_id_number || payload.id_number || null,
         hasInvitationCode: payload.has_invitation_code || payload.do_you_have_an_invitation_code,
         invitationCode: payload.invitation_code || null,
         monthlyRentAmount: positiveNumber(payload.monthly_rent_amount, "monthly_rent_amount"),
@@ -72,6 +73,7 @@ export class FlowProcessor {
       return this.service.createSaveTowardsRentGoal({
         fullName: required(payload.full_name, "full_name"),
         phoneNumber: required(payload.phone_number, "phone_number"),
+        nationalIdNumber: payload.national_id_number || payload.id_number || null,
         monthlyRentAmount: positiveNumber(payload.monthly_rent_amount, "monthly_rent_amount"),
         rentDueDay: dueDay(payload.rent_due_day),
         savingsFrequency: frequency(payload.savings_frequency),

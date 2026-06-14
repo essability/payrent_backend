@@ -93,6 +93,7 @@ export class PayRentService {
     fullName,
     phoneNumber,
     email,
+    nationalIdNumber,
     hasInvitationCode,
     invitationCode,
     monthlyRentAmount,
@@ -103,7 +104,7 @@ export class PayRentService {
       fullName,
       phoneNumber,
       email,
-      nationalIdNumber: null,
+      nationalIdNumber,
       signupChannel
     });
 
@@ -117,7 +118,7 @@ export class PayRentService {
           code: invitationCode,
           fullName,
           phoneNumber,
-          nationalIdNumber: null,
+          nationalIdNumber,
           signupChannel
         });
 
@@ -161,6 +162,7 @@ export class PayRentService {
   async createSaveTowardsRentGoal({
     fullName,
     phoneNumber,
+    nationalIdNumber,
     monthlyRentAmount,
     rentDueDay,
     savingsFrequency,
@@ -171,7 +173,7 @@ export class PayRentService {
       fullName,
       phoneNumber,
       email: null,
-      nationalIdNumber: null,
+      nationalIdNumber,
       signupChannel
     });
 
@@ -240,6 +242,54 @@ export class PayRentService {
     return { user, profile };
   }
 
+  async createLandlordFromChat(payload) {
+    const result = await this.createLandlord({
+      fullName: payload.full_name,
+      phoneNumber: payload.phone_number,
+      email: payload.email || null,
+      nationalIdNumber: payload.national_id_number || payload.id_number || null,
+      landlordType: payload.landlord_type || "individual_landlord",
+      companyName: payload.company_name || null,
+      signupChannel: "whatsapp"
+    });
+
+    let property = null;
+    if (payload.property_name) {
+      property = await this.db.insert("properties", {
+        landlord_user_id: result.user.id,
+        property_manager_user_id: null,
+        name: payload.property_name,
+        address: null,
+        city: payload.county || "Unknown",
+        county: payload.county || "Unknown",
+        country: "Kenya"
+      });
+    }
+
+    const submission = await this.db.insert("flow_submissions", {
+      flow_name: "landlord_registration",
+      source: "whatsapp_chat_fallback",
+      phone_number: payload.phone_number,
+      user_id: result.user.id,
+      payload,
+      result: {
+        user_id: result.user.id,
+        profile_id: result.profile.id,
+        property_id: property?.id || null
+      },
+      status: "processed",
+      submission_summary: {
+        full_name: payload.full_name,
+        property_name: payload.property_name || null,
+        county: payload.county || null,
+        units_count: payload.units_count || null,
+        payment_method: payload.payment_method || null
+      }
+    });
+
+    return { ...result, property, submission };
+  }
+
   async createPropertyManager({ fullName, phoneNumber, email, nationalIdNumber, companyName, signupChannel = "web" }) {
     const user = await this.upsertUser({
       fullName,
@@ -260,6 +310,38 @@ export class PayRentService {
     });
 
     return { user, profile };
+  }
+
+  async createPropertyManagerFromChat(payload) {
+    const result = await this.createPropertyManager({
+      fullName: payload.full_name,
+      phoneNumber: payload.phone_number,
+      email: payload.email || null,
+      nationalIdNumber: payload.national_id_number || payload.id_number || null,
+      companyName: payload.company_name || "Independent Property Manager",
+      signupChannel: "whatsapp"
+    });
+
+    const submission = await this.db.insert("flow_submissions", {
+      flow_name: "property_manager_registration",
+      source: "whatsapp_chat_fallback",
+      phone_number: payload.phone_number,
+      user_id: result.user.id,
+      payload,
+      result: {
+        user_id: result.user.id,
+        profile_id: result.profile.id
+      },
+      status: "processed",
+      submission_summary: {
+        full_name: payload.full_name,
+        company_name: payload.company_name || null,
+        properties_count: payload.properties_count || null,
+        county: payload.county || null
+      }
+    });
+
+    return { ...result, submission };
   }
 
   async createPropertyWithFirstUnit({
@@ -755,6 +837,7 @@ export class PayRentService {
     if (existing) {
       return this.db.update("onboarding_sessions", {
         wa_id: waId || existing.wa_id || null,
+        flow: onboardingFlowForType(flowType),
         selected_option: selectedOption,
         selected_user_type: flowType,
         current_step: step,
@@ -767,7 +850,7 @@ export class PayRentService {
     return this.db.insert("onboarding_sessions", {
       phone_number: phoneNumber,
       wa_id: waId || null,
-      flow: flowType === "tenant" ? "independent_tenant" : "independent_tenant",
+      flow: onboardingFlowForType(flowType),
       status: "active",
       current_step: step,
       selected_option: selectedOption,
@@ -868,6 +951,13 @@ export class PayRentService {
 
 function isYes(value) {
   return ["yes", "y", "true", "1"].includes(String(value || "").trim().toLowerCase());
+}
+
+function onboardingFlowForType(flowType) {
+  if (flowType === "landlord") return "landlord";
+  if (flowType === "property_manager") return "property_manager";
+  if (flowType === "tenant_invitation") return "tenant_invitation";
+  return "independent_tenant";
 }
 
 function validatePin(pin) {

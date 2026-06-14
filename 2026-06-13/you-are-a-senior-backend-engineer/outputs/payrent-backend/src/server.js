@@ -351,7 +351,7 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, fo
     };
   }
 
-  if (activeSession?.status === "active") {
+  if (isRealActiveFlowSession(activeSession)) {
     return continueFlow(activeSession, text);
   }
 
@@ -359,7 +359,8 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, fo
     return {
       reply: WELCOME_MENU,
       selectedOption: null,
-      selectedUserType: null
+      selectedUserType: null,
+      skipSessionUpdate: true
     };
   }
 
@@ -367,7 +368,8 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, fo
     return {
       reply: "Thank you ❤️ We’re creating your PayRent tenant profile now.",
       fallbackFlowName: "tenant_registration",
-      fallbackPayload: parseColonCsvPayload(text, "tenant")
+      fallbackPayload: parseColonCsvPayload(text, "tenant"),
+      skipSessionUpdate: true
     };
   }
 
@@ -375,7 +377,8 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, fo
     return {
       reply: "Beautiful ❤️ We’re creating your rent savings goal now.",
       fallbackFlowName: "save_towards_rent",
-      fallbackPayload: parseColonCsvPayload(text, "save")
+      fallbackPayload: parseColonCsvPayload(text, "save"),
+      skipSessionUpdate: true
     };
   }
 
@@ -458,18 +461,68 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, fo
   }
 
   if (normalized === "2") {
-    return {
-      reply: "Landlord registration is coming next. For now, please reply 1 if you want to test Tenant registration or 4 to Save Towards Rent.",
+    const session = await service.startOnboardingFlow({
+      phoneNumber,
+      waId: phoneNumber,
+      flowType: "landlord",
       selectedOption: "2",
-      selectedUserType: "landlord"
+      step: "full_name",
+      data: {
+        flow_type: "landlord",
+        step: "full_name",
+        profile_name: profileName,
+        phone_number: phoneNumber,
+        mpesa_number: phoneNumber
+      }
+    });
+    console.log("Started session", session);
+
+    return {
+      reply: [
+        "Beautiful choice ❤️",
+        "",
+        "Let’s register you as a PayRent landlord.",
+        "",
+        "First, what is your full name?"
+      ].join("\n"),
+      selectedOption: "2",
+      selectedUserType: "landlord",
+      currentStep: "full_name",
+      sessionData: session.data,
+      skipSessionUpdate: true
     };
   }
 
   if (normalized === "3") {
-    return {
-      reply: "Property Manager registration is coming next. For now, please reply 1 if you want to test Tenant registration or 4 to Save Towards Rent.",
+    const session = await service.startOnboardingFlow({
+      phoneNumber,
+      waId: phoneNumber,
+      flowType: "property_manager",
       selectedOption: "3",
-      selectedUserType: "property_manager"
+      step: "full_name",
+      data: {
+        flow_type: "property_manager",
+        step: "full_name",
+        profile_name: profileName,
+        phone_number: phoneNumber,
+        mpesa_number: phoneNumber
+      }
+    });
+    console.log("Started session", session);
+
+    return {
+      reply: [
+        "Beautiful choice ❤️",
+        "",
+        "Let’s register you as a PayRent property manager.",
+        "",
+        "First, what is your full name?"
+      ].join("\n"),
+      selectedOption: "3",
+      selectedUserType: "property_manager",
+      currentStep: "full_name",
+      sessionData: session.data,
+      skipSessionUpdate: true
     };
   }
 
@@ -477,7 +530,8 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, fo
     return {
       reply: AI_FALLBACK_REPLY,
       selectedOption: null,
-      selectedUserType: null
+      selectedUserType: null,
+      skipSessionUpdate: true
     };
   }
 
@@ -485,7 +539,8 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, fo
     return {
       reply: "Rent payment through M-PESA is coming soon ❤️ For now, PayRent can help you register, save towards rent, track your goal, and receive reminders. Reply 1 for Tenant or 4 to Save Towards Rent.",
       selectedOption: null,
-      selectedUserType: null
+      selectedUserType: null,
+      skipSessionUpdate: true
     };
   }
 
@@ -494,7 +549,8 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, fo
     return {
       reply: WELCOME_MENU,
       selectedOption: null,
-      selectedUserType: null
+      selectedUserType: null,
+      skipSessionUpdate: true
     };
   }
 
@@ -502,7 +558,8 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, fo
   return {
     reply: aiReply,
     selectedOption: null,
-    selectedUserType: "ai_assistant"
+    selectedUserType: "ai_assistant",
+    skipSessionUpdate: true
   };
 }
 
@@ -568,7 +625,7 @@ async function getActiveSessionForDecision(phoneNumber) {
 async function continueFlow(session, message) {
   const data = session.data || {};
   const flowType = data.flow_type || session.selected_user_type;
-  const step = data.step || session.current_step;
+  const step = normalizeOnboardingStep(data.step || session.current_step);
 
   console.log("Current flow", flowType);
   console.log("Current step", step);
@@ -580,6 +637,14 @@ async function continueFlow(session, message) {
 
   if (flowType === "save_towards_rent") {
     return continueSaveTowardsRentFlow(session, data, step, message);
+  }
+
+  if (flowType === "landlord") {
+    return continueLandlordFlow(session, data, step, message);
+  }
+
+  if (flowType === "property_manager") {
+    return continuePropertyManagerFlow(session, data, step, message);
   }
 
   console.log("Next step", "choose_user_type");
@@ -612,7 +677,8 @@ async function continueTenantFlow(session, data, step, message) {
     await service.advanceOnboardingFlow({ session, step: nextStep, data: nextData });
     console.log("Next step", nextStep);
     return {
-      reply: hasInvitation ? "Please enter your invitation code." : "What is your monthly rent amount?"
+      reply: hasInvitation ? "Please enter your invitation code." : "What is your monthly rent amount?",
+      skipSessionUpdate: true
     };
   }
 
@@ -651,6 +717,169 @@ async function continueTenantFlow(session, data, step, message) {
 
   console.log("Next step", "unknown");
   return { reply: "Please reply MENU to restart or CANCEL to stop.", skipSessionUpdate: true };
+}
+
+async function continueLandlordFlow(session, data, step, message) {
+  if (step === "full_name") {
+    const nextData = { ...data, full_name: message, step: "id_number" };
+    await service.advanceOnboardingFlow({ session, step: "id_number", data: nextData });
+    console.log("Next step", "id_number");
+    return { reply: "What is your ID number?", skipSessionUpdate: true };
+  }
+
+  if (step === "id_number") {
+    const nextData = { ...data, id_number: message, national_id_number: message, step: "property_name" };
+    await service.advanceOnboardingFlow({ session, step: "property_name", data: nextData });
+    console.log("Next step", "property_name");
+    return { reply: "What is the name of your property?", skipSessionUpdate: true };
+  }
+
+  if (step === "property_name") {
+    const nextData = { ...data, property_name: message, step: "county" };
+    await service.advanceOnboardingFlow({ session, step: "county", data: nextData });
+    console.log("Next step", "county");
+    return { reply: "Which county is the property in?", skipSessionUpdate: true };
+  }
+
+  if (step === "county") {
+    const nextData = { ...data, county: message, step: "units" };
+    await service.advanceOnboardingFlow({ session, step: "units", data: nextData });
+    console.log("Next step", "units");
+    return { reply: "How many units do you manage at this property?", skipSessionUpdate: true };
+  }
+
+  if (step === "units") {
+    const nextData = { ...data, units_count: message, step: "payment_method" };
+    await service.advanceOnboardingFlow({ session, step: "payment_method", data: nextData });
+    console.log("Next step", "payment_method");
+    return { reply: "How do you currently receive rent? Reply M-PESA, Bank, or Cash.", skipSessionUpdate: true };
+  }
+
+  if (step === "payment_method") {
+    const payload = {
+      ...data,
+      payment_method: message,
+      phone_number: data.phone_number || session.phone_number,
+      full_name: data.full_name || data.profile_name || "WhatsApp User",
+      flow_name: "landlord_registration"
+    };
+    await service.advanceOnboardingFlow({ session, step: "complete", data: { ...payload, step: "complete" }, status: "completed" });
+    try {
+      await service.createLandlordFromChat(payload);
+    } catch (error) {
+      console.error("Landlord Flow Save Error:", error);
+      return {
+        reply: "Thank you ❤️ I received your landlord details, but I could not save them right now. Please reply MENU and try again in a moment.",
+        skipSessionUpdate: true
+      };
+    }
+    console.log("Next step", "complete");
+    return {
+      reply: [
+        `Thank you ${payload.full_name} ❤️`,
+        "",
+        "Your PayRent landlord profile has been created.",
+        "",
+        "You can now create properties, invite tenants, and track rent collections as we open more tools for you."
+      ].join("\n"),
+      skipSessionUpdate: true
+    };
+  }
+
+  console.log("Next step", "unknown");
+  return { reply: "Please reply MENU to restart or CANCEL to stop.", skipSessionUpdate: true };
+}
+
+async function continuePropertyManagerFlow(session, data, step, message) {
+  if (step === "full_name") {
+    const nextData = { ...data, full_name: message, step: "id_number" };
+    await service.advanceOnboardingFlow({ session, step: "id_number", data: nextData });
+    console.log("Next step", "id_number");
+    return { reply: "What is your ID number?", skipSessionUpdate: true };
+  }
+
+  if (step === "id_number") {
+    const nextData = { ...data, id_number: message, national_id_number: message, step: "company_name" };
+    await service.advanceOnboardingFlow({ session, step: "company_name", data: nextData });
+    console.log("Next step", "company_name");
+    return { reply: "What is your company name?", skipSessionUpdate: true };
+  }
+
+  if (step === "company_name") {
+    const nextData = { ...data, company_name: message, step: "properties_count" };
+    await service.advanceOnboardingFlow({ session, step: "properties_count", data: nextData });
+    console.log("Next step", "properties_count");
+    return { reply: "How many properties do you manage?", skipSessionUpdate: true };
+  }
+
+  if (step === "properties_count") {
+    const nextData = { ...data, properties_count: message, step: "county" };
+    await service.advanceOnboardingFlow({ session, step: "county", data: nextData });
+    console.log("Next step", "county");
+    return { reply: "Which county do you mainly operate in?", skipSessionUpdate: true };
+  }
+
+  if (step === "county") {
+    const payload = {
+      ...data,
+      county: message,
+      phone_number: data.phone_number || session.phone_number,
+      full_name: data.full_name || data.profile_name || "WhatsApp User",
+      flow_name: "property_manager_registration"
+    };
+    await service.advanceOnboardingFlow({ session, step: "complete", data: { ...payload, step: "complete" }, status: "completed" });
+    try {
+      await service.createPropertyManagerFromChat(payload);
+    } catch (error) {
+      console.error("Property Manager Flow Save Error:", error);
+      return {
+        reply: "Thank you ❤️ I received your property manager details, but I could not save them right now. Please reply MENU and try again in a moment.",
+        skipSessionUpdate: true
+      };
+    }
+    console.log("Next step", "complete");
+    return {
+      reply: [
+        `Thank you ${payload.full_name} ❤️`,
+        "",
+        "Your PayRent property manager profile has been created.",
+        "",
+        "You can now manage landlords, properties, tenants, and collections as we open more tools for you."
+      ].join("\n"),
+      skipSessionUpdate: true
+    };
+  }
+
+  console.log("Next step", "unknown");
+  return { reply: "Please reply MENU to restart or CANCEL to stop.", skipSessionUpdate: true };
+}
+
+function isRealActiveFlowSession(session) {
+  if (!session || session.status !== "active") return false;
+  const data = session.data || {};
+  const flowType = data.flow_type || session.selected_user_type;
+  const step = normalizeOnboardingStep(data.step || session.current_step);
+
+  return Boolean(
+    flowType &&
+    step &&
+    !["choose_user_type", "flow_launch_requested", "complete", "completed", "cancelled"].includes(step)
+  );
+}
+
+function normalizeOnboardingStep(step) {
+  const normalized = String(step || "").trim();
+  const aliases = {
+    chat_tenant_full_name: "full_name",
+    chat_save_full_name: "full_name",
+    chat_tenant_id_number: "id_number",
+    chat_save_id_number: "id_number",
+    chat_tenant_monthly_rent: "monthly_rent",
+    chat_save_monthly_rent: "monthly_rent",
+    chat_tenant_due_day: "due_day",
+    chat_save_due_day: "due_day"
+  };
+  return aliases[normalized] || normalized;
 }
 
 async function continueSaveTowardsRentFlow(session, data, step, message) {
@@ -845,12 +1074,20 @@ async function launchWhatsAppFlowInBackground({ to, flowName, profileName, phone
     console.error("Flow Launch Error:", error);
     if (sessionId) {
       try {
+        const session = await service.getActiveOnboardingSession(phoneNumber);
+        const selectedUserType = flowName === "tenant_registration" ? "tenant" : "save_towards_rent";
         await service.updateOnboardingSession({
           id: sessionId,
-          currentStep: flowName === "tenant_registration" ? "chat_tenant_full_name" : "chat_save_full_name",
-          data: {},
+          currentStep: session?.current_step || "full_name",
+          data: {
+            ...(session?.data || {}),
+            flow_type: session?.data?.flow_type || selectedUserType,
+            step: normalizeOnboardingStep(session?.data?.step || session?.current_step || "full_name"),
+            native_flow_name: flowName,
+            native_flow_error: error.message || String(error)
+          },
           selectedOption: flowName === "tenant_registration" ? "1" : "4",
-          selectedUserType: flowName,
+          selectedUserType,
           nativeFlowAttempted: true,
           nativeFlowContentSid: contentSid,
           fallbackChatActive: true
