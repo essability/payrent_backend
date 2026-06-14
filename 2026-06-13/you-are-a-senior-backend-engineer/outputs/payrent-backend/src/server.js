@@ -6,7 +6,6 @@ import { AI_FALLBACK_REPLY, generatePayRentReply } from "./ai.js";
 import { getConfig } from "./config.js";
 import { extractTwilioFlowPayload, FlowProcessor } from "./flowProcessor.js";
 import { readForm, readJson, requireApiSecret, sendJson, sendText } from "./http.js";
-import { OnboardingEngine } from "./onboarding.js";
 import { PayRentService } from "./payrentService.js";
 import { SupabaseRest } from "./supabaseRest.js";
 import { normalizeWhatsAppPhone, sendTwilioWhatsAppMessage, twiml, validateTwilioSignature } from "./twilio.js";
@@ -20,7 +19,6 @@ const db = new SupabaseRest({
   serviceRoleKey: config.supabaseServiceRoleKey
 });
 const service = new PayRentService(db);
-const onboarding = new OnboardingEngine(db, service);
 const flowProcessor = new FlowProcessor(service);
 
 const WELCOME_MENU = [
@@ -54,40 +52,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/webhook/whatsapp") {
-      try {
-        console.log("Step 1");
-        const form = await readForm(req);
-        console.log("Incoming Twilio WhatsApp webhook:", form);
-
-        console.log("Step 2");
-        const phoneNumber = normalizeWhatsAppPhone(form.From);
-        const waId = form.WaId || phoneNumber;
-        const profileName = form.ProfileName || "there";
-        const message = form.Body || "";
-        const decision = await decidePayRentWelcomeReply({
-          message,
-          phoneNumber,
-          profileName,
-          formBaseUrl: publicBaseUrlFromRequest(req)
-        });
-
-        console.log("Step 3");
-        sendText(res, 200, twiml(decision.reply), "text/xml; charset=utf-8");
-
-        handleWhatsAppWebhookInBackground({
-          phoneNumber,
-          waId,
-          profileName,
-          incomingMessage: message,
-          outgoingMessage: decision.reply,
-          decision
-        });
-        return;
-      } catch (error) {
-        console.error("Webhook Error:", error);
-      }
-
-      sendText(res, 200, twiml(WELCOME_MENU), "text/xml; charset=utf-8");
+      await handlePrimaryWhatsAppWebhook({ req, res });
       return;
     }
 
@@ -159,10 +124,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const phoneNumber = normalizeWhatsAppPhone(form.From);
-      const message = form.Body || "";
-      const reply = await onboarding.handleWhatsAppMessage({ phoneNumber, body: message });
-      sendText(res, 200, twiml(reply), "text/xml; charset=utf-8");
+      await handlePrimaryWhatsAppWebhook({ req, res, preloadedForm: form });
       return;
     }
 
@@ -308,6 +270,41 @@ const server = http.createServer(async (req, res) => {
 server.listen(config.port, () => {
   console.log(`PayRent backend listening on http://localhost:${config.port}`);
 });
+
+async function handlePrimaryWhatsAppWebhook({ req, res, preloadedForm }) {
+  try {
+    console.log("Step 1");
+    const form = preloadedForm || await readForm(req);
+    console.log("Incoming Twilio WhatsApp webhook:", form);
+
+    console.log("Step 2");
+    const phoneNumber = normalizeWhatsAppPhone(form.From);
+    const waId = form.WaId || phoneNumber;
+    const profileName = form.ProfileName || "there";
+    const message = form.Body || "";
+    const decision = await decidePayRentWelcomeReply({
+      message,
+      phoneNumber,
+      profileName,
+      formBaseUrl: publicBaseUrlFromRequest(req)
+    });
+
+    console.log("Step 3");
+    sendText(res, 200, twiml(decision.reply), "text/xml; charset=utf-8");
+
+    handleWhatsAppWebhookInBackground({
+      phoneNumber,
+      waId,
+      profileName,
+      incomingMessage: message,
+      outgoingMessage: decision.reply,
+      decision
+    });
+  } catch (error) {
+    console.error("Webhook Error:", error);
+    sendText(res, 200, twiml(WELCOME_MENU), "text/xml; charset=utf-8");
+  }
+}
 
 function publicUrlFromRequest(req, url) {
   const proto = req.headers["x-forwarded-proto"] || "https";
