@@ -88,6 +88,17 @@
     "body": "Save toward your rent on {{1}}. Enter the amount, payment reference, and transaction PIN to update your rent goal."
   },
   {
+    "flowName": "save_towards_rent",
+    "friendlyName": "payrent_save_towards_rent",
+    "language": "en",
+    "approvalName": "payrent_save_towards_rent",
+    "approvalCategory": "UTILITY",
+    "variables": {
+      "1": "PayRent"
+    },
+    "body": "Create your rent savings goal on {{1}}. Add your rent amount, due day, and how often you want to save."
+  },
+  {
     "flowName": "rent_goal_update",
     "friendlyName": "payrent_rent_goal_update",
     "language": "en",

@@ -88,6 +88,134 @@ export class PayRentService {
     return { user, rentGoal };
   }
 
+  async createTenantFromFlow({
+    fullName,
+    phoneNumber,
+    email,
+    hasInvitationCode,
+    invitationCode,
+    monthlyRentAmount,
+    rentDueDay,
+    signupChannel = "whatsapp"
+  }) {
+    const user = await this.upsertUser({
+      fullName,
+      phoneNumber,
+      email,
+      nationalIdNumber: null,
+      signupChannel
+    });
+
+    await this.assignRole(user.id, "tenant");
+    await this.ensureTenantProfile(user.id);
+
+    const shouldUseInvitation = isYes(hasInvitationCode) && invitationCode;
+    if (shouldUseInvitation) {
+      try {
+        const invitationResult = await this.acceptTenantInvitation({
+          code: invitationCode,
+          fullName,
+          phoneNumber,
+          nationalIdNumber: null,
+          signupChannel
+        });
+
+        return {
+          user,
+          linkedByInvitation: true,
+          invitation: invitationResult.invitation,
+          assignment: invitationResult.assignment
+        };
+      } catch (error) {
+        return {
+          user,
+          linkedByInvitation: false,
+          invitationError: error.message,
+          rentGoal: await this.createRentGoalForUser({
+            userId: user.id,
+            monthlyRentAmount,
+            rentDueDay,
+            metadata: {
+              source: "tenant_registration_flow",
+              invitation_code_attempted: invitationCode,
+              invitation_error: error.message
+            }
+          })
+        };
+      }
+    }
+
+    const rentGoal = await this.createRentGoalForUser({
+      userId: user.id,
+      monthlyRentAmount,
+      rentDueDay,
+      metadata: {
+        source: "tenant_registration_flow"
+      }
+    });
+
+    return { user, linkedByInvitation: false, rentGoal };
+  }
+
+  async createSaveTowardsRentGoal({
+    fullName,
+    phoneNumber,
+    monthlyRentAmount,
+    rentDueDay,
+    savingsFrequency,
+    targetStartDate,
+    signupChannel = "whatsapp"
+  }) {
+    const user = await this.upsertUser({
+      fullName,
+      phoneNumber,
+      email: null,
+      nationalIdNumber: null,
+      signupChannel
+    });
+
+    await this.assignRole(user.id, "tenant");
+    await this.ensureTenantProfile(user.id);
+
+    const rentGoal = await this.createRentGoalForUser({
+      userId: user.id,
+      monthlyRentAmount,
+      rentDueDay,
+      savingsFrequency,
+      targetStartDate,
+      metadata: {
+        source: "save_towards_rent_flow"
+      }
+    });
+
+    const savingsPreference = await this.db.insert("savings_preferences", {
+      user_id: user.id,
+      rent_goal_id: rentGoal.id,
+      frequency: savingsFrequency,
+      target_start_date: targetStartDate || null,
+      channel: "whatsapp",
+      is_active: true
+    });
+
+    return { user, rentGoal, savingsPreference };
+  }
+
+  async createRentGoalForUser({ userId, monthlyRentAmount, rentDueDay, savingsFrequency, targetStartDate, metadata = {} }) {
+    const targetMonth = new Date();
+    targetMonth.setUTCDate(1);
+
+    return this.db.insert("rent_goals", {
+      tenant_user_id: userId,
+      monthly_rent_amount: monthlyRentAmount,
+      rent_due_day: rentDueDay,
+      target_month: targetMonth.toISOString().slice(0, 10),
+      amount_saved: 0,
+      savings_frequency: savingsFrequency || null,
+      target_start_date: targetStartDate || null,
+      metadata
+    });
+  }
+
   async createLandlord({ fullName, phoneNumber, email, nationalIdNumber, landlordType, companyName, signupChannel = "web" }) {
     const user = await this.upsertUser({
       fullName,
@@ -471,10 +599,11 @@ export class PayRentService {
     return submission;
   }
 
-  async markFlowSubmissionProcessed(id, result) {
+  async markFlowSubmissionProcessed(id, result, submissionSummary = {}) {
     return this.db.update("flow_submissions", {
       status: "processed",
-      result
+      result,
+      submission_summary: submissionSummary
     }, `?id=${eq(id)}`);
   }
 
@@ -572,6 +701,44 @@ export class PayRentService {
       message: messageBody
     });
   }
+
+  async createOrUpdateMenuSession({ phoneNumber, waId, selectedOption, selectedUserType, currentStep = "choose_user_type" }) {
+    const existing = await this.db.select("onboarding_sessions", {
+      query: `?phone_number=${eq(phoneNumber)}&status=eq.active&select=*&order=created_at.desc&limit=1`,
+      single: true
+    });
+
+    const data = {
+      selected_option: selectedOption || null,
+      selected_user_type: selectedUserType || null
+    };
+
+    if (existing) {
+      return this.db.update("onboarding_sessions", {
+        wa_id: waId || existing.wa_id || null,
+        selected_option: selectedOption || existing.selected_option || null,
+        selected_user_type: selectedUserType || existing.selected_user_type || null,
+        current_step: currentStep,
+        data,
+        expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString()
+      }, `?id=${eq(existing.id)}`);
+    }
+
+    return this.db.insert("onboarding_sessions", {
+      phone_number: phoneNumber,
+      wa_id: waId || null,
+      flow: "independent_tenant",
+      status: "active",
+      current_step: currentStep,
+      selected_option: selectedOption || null,
+      selected_user_type: selectedUserType || null,
+      data
+    });
+  }
+}
+
+function isYes(value) {
+  return ["yes", "y", "true", "1"].includes(String(value || "").trim().toLowerCase());
 }
 
 function validatePin(pin) {

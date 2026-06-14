@@ -5,6 +5,7 @@ Small Node.js backend for PayRent registration through WhatsApp, web, and invita
 ## What it supports
 
 - Twilio WhatsApp webhook: `POST /webhooks/twilio/whatsapp`
+- Primary Twilio WhatsApp onboarding webhook: `POST /webhook/whatsapp`
 - Twilio WhatsApp Flow submission webhook: `POST /webhooks/twilio/whatsapp-flow`
 - Independent tenant registration from WhatsApp
 - Tenant registration from invitation code
@@ -12,6 +13,7 @@ Small Node.js backend for PayRent registration through WhatsApp, web, and invita
 - Web/API landlord registration
 - WhatsApp Flow JSON definitions for tenant, landlord, property manager, property creation, and rent payment
 - Operational WhatsApp forms for PIN setup, savings, balance checks, payment history, statements, tenant invitations, unit creation, and maintenance issues
+- Warm PayRent WhatsApp welcome menu before launching form-style flows
 - Conversation and message saving
 - Supabase PostgreSQL through the Supabase REST API
 
@@ -23,6 +25,7 @@ You already created the main tables. Run this additional SQL in Supabase SQL Edi
 -- See migrations/002_onboarding_sessions.sql
 -- See migrations/003_whatsapp_flows.sql
 -- See migrations/004_payrent_operational_flows.sql
+-- See migrations/005_payrent_whatsapp_onboarding.sql
 ```
 
 ## 2. Configure environment
@@ -37,7 +40,7 @@ API_SECRET=change-me
 TWILIO_AUTH_TOKEN=your-twilio-auth-token
 TWILIO_ACCOUNT_SID=your-twilio-account-sid
 TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
-TWILIO_FLOW_CONTENT_SIDS={"tenant_registration":"HX...","set_transaction_pin":"HX...","savings_deposit":"HX...","rent_payment":"HX..."}
+TWILIO_FLOW_CONTENT_SIDS={"tenant_registration":"HX...","save_towards_rent":"HX...","set_transaction_pin":"HX...","savings_deposit":"HX...","rent_payment":"HX..."}
 ```
 
 For local testing, load the env vars before starting:
@@ -55,7 +58,7 @@ In Twilio WhatsApp Sandbox or your WhatsApp Sender settings, set:
 
 ```text
 When a message comes in:
-https://your-public-domain.com/webhooks/twilio/whatsapp
+https://your-public-domain.com/webhook/whatsapp
 ```
 
 For local development, expose your server with a tunnel such as ngrok:
@@ -72,6 +75,7 @@ Flow definitions are in:
 
 ```text
 flows/tenant_registration.json
+flows/save_towards_rent.json
 flows/landlord_registration.json
 flows/property_manager_registration.json
 flows/property_creation.json
@@ -193,6 +197,7 @@ The backend currently supports these Flow submissions:
 
 ```text
 tenant_registration
+save_towards_rent
 landlord_registration
 property_manager_registration
 property_creation
@@ -206,6 +211,86 @@ rent_balance_check
 payment_history
 tenant_statement_request
 maintenance_issue
+```
+
+## 3c. First 50% WhatsApp onboarding test
+
+Set Twilio **When a message comes in** to:
+
+```text
+https://your-railway-domain/webhook/whatsapp
+```
+
+Then send any first message:
+
+```text
+Hi
+```
+
+Expected response:
+
+```text
+🏠 Welcome to PayRent Kenya 🇰🇪
+
+We’re so happy to have you here.
+
+PayRent helps you manage rent, save towards rent, receive reminders, and make rent payments directly from WhatsApp — simple, safe, and stress-free.
+
+Please choose how you want to continue:
+
+1️⃣ I am a Tenant
+2️⃣ I am a Landlord
+3️⃣ I am a Property Manager
+4️⃣ I just want to Save Towards Rent
+
+With love,
+Ruth ❤️
+CEO, PayRent Kenya
+
+Reply with 1, 2, 3, or 4.
+```
+
+Reply:
+
+```text
+1
+```
+
+The backend will request the `tenant_registration` WhatsApp Flow using the `TWILIO_FLOW_CONTENT_SIDS.tenant_registration` value.
+
+Reply:
+
+```text
+4
+```
+
+The backend will request the `save_towards_rent` WhatsApp Flow using the `TWILIO_FLOW_CONTENT_SIDS.save_towards_rent` value.
+
+If the Twilio Sandbox cannot launch WhatsApp Flows yet, use chat fallback.
+
+Tenant fallback:
+
+```text
+TENANT: Jane Wambui, +254711111111, jane@example.com, NO, 18000, 5
+```
+
+Tenant with invitation fallback:
+
+```text
+TENANT: Jane Wambui, +254711111111, jane@example.com, JOIN-A1-2026, 18000, 5
+```
+
+Save Toward Rent fallback:
+
+```text
+SAVE: Jane Wambui, +254711111111, 18000, 5, weekly, 2026-07-01
+```
+
+Landlord and property manager are intentionally held for the next build phase:
+
+```text
+2
+3
 ```
 
 ## 4. WhatsApp registration flow

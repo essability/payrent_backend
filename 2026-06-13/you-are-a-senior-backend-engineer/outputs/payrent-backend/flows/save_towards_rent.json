@@ -2,12 +2,12 @@
   "version": "7.1",
   "data_api_version": "3.0",
   "routing_model": {
-    "TENANT_REGISTRATION": []
+    "SAVE_TOWARDS_RENT": []
   },
   "screens": [
     {
-      "id": "TENANT_REGISTRATION",
-      "title": "Tenant Registration",
+      "id": "SAVE_TOWARDS_RENT",
+      "title": "Save Towards Rent",
       "terminal": true,
       "success": true,
       "layout": {
@@ -15,7 +15,7 @@
         "children": [
           {
             "type": "Form",
-            "name": "tenant_registration_form",
+            "name": "save_towards_rent_form",
             "children": [
               {
                 "type": "TextInput",
@@ -33,30 +33,6 @@
               },
               {
                 "type": "TextInput",
-                "name": "email",
-                "label": "Email",
-                "required": false,
-                "input-type": "email"
-              },
-              {
-                "type": "Dropdown",
-                "name": "has_invitation_code",
-                "label": "Do you have an invitation code?",
-                "required": true,
-                "data-source": [
-                  { "id": "yes", "title": "Yes" },
-                  { "id": "no", "title": "No" }
-                ]
-              },
-              {
-                "type": "TextInput",
-                "name": "invitation_code",
-                "label": "Invitation Code",
-                "required": false,
-                "input-type": "text"
-              },
-              {
-                "type": "TextInput",
                 "name": "monthly_rent_amount",
                 "label": "Monthly Rent Amount",
                 "required": true,
@@ -70,19 +46,36 @@
                 "input-type": "number"
               },
               {
+                "type": "Dropdown",
+                "name": "savings_frequency",
+                "label": "Savings Frequency",
+                "required": true,
+                "data-source": [
+                  { "id": "daily", "title": "Daily" },
+                  { "id": "weekly", "title": "Weekly" },
+                  { "id": "monthly", "title": "Monthly" }
+                ]
+              },
+              {
+                "type": "TextInput",
+                "name": "target_start_date",
+                "label": "Target Start Date",
+                "required": false,
+                "input-type": "text"
+              },
+              {
                 "type": "Footer",
-                "label": "Create profile",
+                "label": "Create savings goal",
                 "on-click-action": {
                   "name": "complete",
                   "payload": {
-                    "flow_name": "tenant_registration",
+                    "flow_name": "save_towards_rent",
                     "full_name": "${form.full_name}",
                     "phone_number": "${form.phone_number}",
-                    "email": "${form.email}",
-                    "has_invitation_code": "${form.has_invitation_code}",
-                    "invitation_code": "${form.invitation_code}",
                     "monthly_rent_amount": "${form.monthly_rent_amount}",
-                    "rent_due_day": "${form.rent_due_day}"
+                    "rent_due_day": "${form.rent_due_day}",
+                    "savings_frequency": "${form.savings_frequency}",
+                    "target_start_date": "${form.target_start_date}"
                   }
                 }
               }

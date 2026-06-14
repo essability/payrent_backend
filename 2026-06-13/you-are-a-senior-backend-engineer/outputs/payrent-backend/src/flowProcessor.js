@@ -1,5 +1,6 @@
 const FLOW_NAMES = new Set([
   "tenant_registration",
+  "save_towards_rent",
   "landlord_registration",
   "property_manager_registration",
   "property_creation",
@@ -36,7 +37,11 @@ export class FlowProcessor {
 
     try {
       const result = await this.dispatch(normalizedFlowName, normalizedPayload);
-      await this.service.markFlowSubmissionProcessed(submission.id, serializeResult(result));
+      await this.service.markFlowSubmissionProcessed(
+        submission.id,
+        serializeResult(result),
+        buildSubmissionSummary(normalizedFlowName, normalizedPayload, result)
+      );
       return { submissionId: submission.id, flowName: normalizedFlowName, result };
     } catch (error) {
       await this.service.markFlowSubmissionFailed(submission.id, error);
@@ -46,12 +51,26 @@ export class FlowProcessor {
 
   async dispatch(flowName, payload) {
     if (flowName === "tenant_registration") {
-      return this.service.createIndependentTenant({
+      return this.service.createTenantFromFlow({
         fullName: required(payload.full_name, "full_name"),
         phoneNumber: required(payload.phone_number, "phone_number"),
-        nationalIdNumber: required(payload.national_id_number, "national_id_number"),
+        email: payload.email || null,
+        hasInvitationCode: payload.has_invitation_code || payload.do_you_have_an_invitation_code,
+        invitationCode: payload.invitation_code || null,
         monthlyRentAmount: positiveNumber(payload.monthly_rent_amount, "monthly_rent_amount"),
         rentDueDay: dueDay(payload.rent_due_day),
+        signupChannel: "whatsapp"
+      });
+    }
+
+    if (flowName === "save_towards_rent") {
+      return this.service.createSaveTowardsRentGoal({
+        fullName: required(payload.full_name, "full_name"),
+        phoneNumber: required(payload.phone_number, "phone_number"),
+        monthlyRentAmount: positiveNumber(payload.monthly_rent_amount, "monthly_rent_amount"),
+        rentDueDay: dueDay(payload.rent_due_day),
+        savingsFrequency: frequency(payload.savings_frequency),
+        targetStartDate: payload.target_start_date || null,
         signupChannel: "whatsapp"
       });
     }
@@ -195,6 +214,36 @@ export class FlowProcessor {
 
     throw new Error(`Unsupported flow_name: ${flowName}`);
   }
+
+  confirmationMessage(flowName, payload) {
+    const normalizedPayload = normalizePayload(payload);
+
+    if (flowName === "tenant_registration") {
+      return [
+        `Thank you ${normalizedPayload.full_name || "there"} ❤️`,
+        "",
+        "Your PayRent tenant profile has been created.",
+        "",
+        "We’ll help you stay on top of your rent and never miss important reminders.",
+        "",
+        "Welcome to the PayRent family."
+      ].join("\n");
+    }
+
+    if (flowName === "save_towards_rent") {
+      return [
+        `Beautiful, ${normalizedPayload.full_name || "there"} ❤️`,
+        "",
+        "Your rent savings goal has been created.",
+        "",
+        "We’ll help you prepare for rent step by step, without pressure.",
+        "",
+        "PayRent is here with you."
+      ].join("\n");
+    }
+
+    return "Thank you. Your PayRent form has been received.";
+  }
 }
 
 export function extractTwilioFlowPayload(form) {
@@ -271,6 +320,28 @@ function dueDay(value) {
   return day;
 }
 
+function frequency(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!["daily", "weekly", "monthly"].includes(normalized)) {
+    throw new Error("savings_frequency must be daily, weekly, or monthly");
+  }
+  return normalized;
+}
+
 function serializeResult(result) {
   return JSON.parse(JSON.stringify(result));
+}
+
+function buildSubmissionSummary(flowName, payload, result) {
+  return {
+    flow_name: flowName,
+    full_name: payload.full_name || null,
+    phone_number: payload.phone_number || payload.tenant_phone_number || null,
+    monthly_rent_amount: payload.monthly_rent_amount || null,
+    rent_due_day: payload.rent_due_day || null,
+    savings_frequency: payload.savings_frequency || null,
+    user_id: result?.user?.id || null,
+    rent_goal_id: result?.rentGoal?.id || null,
+    linked_by_invitation: result?.linkedByInvitation ?? null
+  };
 }
