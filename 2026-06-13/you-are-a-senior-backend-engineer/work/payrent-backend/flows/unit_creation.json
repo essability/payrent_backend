@@ -1,0 +1,44 @@
+{
+  "version": "7.1",
+  "data_api_version": "3.0",
+  "routing_model": { "UNIT_CREATION": [] },
+  "screens": [
+    {
+      "id": "UNIT_CREATION",
+      "title": "Create Unit",
+      "terminal": true,
+      "success": true,
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "unit_creation_form",
+            "children": [
+              { "type": "TextInput", "name": "owner_phone_number", "label": "Your phone number", "required": true, "input-type": "phone" },
+              { "type": "TextInput", "name": "property_id", "label": "Property ID", "required": true, "input-type": "text" },
+              { "type": "TextInput", "name": "unit_number", "label": "Unit number", "required": true, "input-type": "text" },
+              { "type": "TextInput", "name": "monthly_rent_amount", "label": "Monthly rent amount", "required": true, "input-type": "number" },
+              { "type": "TextInput", "name": "rent_due_day", "label": "Rent due day", "required": true, "input-type": "number" },
+              {
+                "type": "Footer",
+                "label": "Create unit",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "flow_name": "unit_creation",
+                    "owner_phone_number": "${form.owner_phone_number}",
+                    "property_id": "${form.property_id}",
+                    "unit_number": "${form.unit_number}",
+                    "monthly_rent_amount": "${form.monthly_rent_amount}",
+                    "rent_due_day": "${form.rent_due_day}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

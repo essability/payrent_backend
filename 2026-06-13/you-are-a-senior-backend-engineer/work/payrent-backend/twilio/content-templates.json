@@ -1,0 +1,193 @@
+[
+  {
+    "flowName": "tenant_registration",
+    "friendlyName": "payrent_tenant_registration",
+    "language": "en",
+    "approvalName": "payrent_tenant_registration",
+    "approvalCategory": "UTILITY",
+    "variables": {
+      "1": "PayRent"
+    },
+    "body": "Welcome to {{1}}. Please complete your tenant registration so we can create your rent goal and help you save toward rent."
+  },
+  {
+    "flowName": "landlord_registration",
+    "friendlyName": "payrent_landlord_registration",
+    "language": "en",
+    "approvalName": "payrent_landlord_registration",
+    "approvalCategory": "UTILITY",
+    "variables": {
+      "1": "PayRent"
+    },
+    "body": "Welcome to {{1}}. Please complete your landlord registration so you can create properties, invite tenants, and track collections."
+  },
+  {
+    "flowName": "property_manager_registration",
+    "friendlyName": "payrent_property_manager_registration",
+    "language": "en",
+    "approvalName": "payrent_property_manager_registration",
+    "approvalCategory": "UTILITY",
+    "variables": {
+      "1": "PayRent"
+    },
+    "body": "Welcome to {{1}}. Please complete your property manager registration to manage properties, tenants, reports, and collections."
+  },
+  {
+    "flowName": "property_creation",
+    "friendlyName": "payrent_property_creation",
+    "language": "en",
+    "approvalName": "payrent_property_creation",
+    "approvalCategory": "UTILITY",
+    "variables": {
+      "1": "PayRent"
+    },
+    "body": "Create a property on {{1}}. Add the property details and first rental unit to start inviting tenants."
+  },
+  {
+    "flowName": "unit_creation",
+    "friendlyName": "payrent_unit_creation",
+    "language": "en",
+    "approvalName": "payrent_unit_creation",
+    "approvalCategory": "UTILITY",
+    "variables": {
+      "1": "PayRent"
+    },
+    "body": "Add a rental unit on {{1}}. Enter the unit number, monthly rent, and rent due day."
+  },
+  {
+    "flowName": "tenant_invitation",
+    "friendlyName": "payrent_tenant_invitation",
+    "language": "en",
+    "approvalName": "payrent_tenant_invitation",
+    "approvalCategory": "UTILITY",
+    "variables": {
+      "1": "PayRent"
+    },
+    "body": "Invite a tenant to {{1}}. Add the tenant phone number and choose the property unit they should join."
+  },
+  {
+    "flowName": "set_transaction_pin",
+    "friendlyName": "payrent_set_transaction_pin",
+    "language": "en",
+    "approvalName": "payrent_set_transaction_pin",
+    "approvalCategory": "UTILITY",
+    "variables": {
+      "1": "PayRent"
+    },
+    "body": "Secure your {{1}} account by setting your transaction PIN. You will use this PIN to approve rent savings and payment actions."
+  },
+  {
+    "flowName": "savings_deposit",
+    "friendlyName": "payrent_savings_deposit",
+    "language": "en",
+    "approvalName": "payrent_savings_deposit",
+    "approvalCategory": "UTILITY",
+    "variables": {
+      "1": "PayRent"
+    },
+    "body": "Save toward your rent on {{1}}. Enter the amount, payment reference, and transaction PIN to update your rent goal."
+  },
+  {
+    "flowName": "save_towards_rent",
+    "friendlyName": "payrent_save_towards_rent",
+    "language": "en",
+    "approvalName": "payrent_save_towards_rent",
+    "approvalCategory": "UTILITY",
+    "variables": {
+      "1": "PayRent"
+    },
+    "body": "Create your rent savings goal on {{1}}. Add your rent amount, due day, and how often you want to save."
+  },
+  {
+    "flowName": "rent_goal_update",
+    "friendlyName": "payrent_rent_goal_update",
+    "language": "en",
+    "approvalName": "payrent_rent_goal_update",
+    "approvalCategory": "UTILITY",
+    "variables": {
+      "1": "PayRent"
+    },
+    "body": "Update your rent goal on {{1}}. Change your monthly rent amount or rent due day securely."
+  },
+  {
+    "flowName": "rent_payment",
+    "friendlyName": "payrent_rent_payment",
+    "language": "en",
+    "approvalName": "payrent_rent_payment",
+    "approvalCategory": "UTILITY",
+    "variables": {
+      "1": "PayRent"
+    },
+    "body": "Make or record a rent payment on {{1}}. Enter the amount, payment method, reference, and transaction PIN."
+  },
+  {
+    "flowName": "rent_balance_check",
+    "friendlyName": "payrent_rent_balance_check",
+    "language": "en",
+    "approvalName": "payrent_rent_balance_check",
+    "approvalCategory": "UTILITY",
+    "variables": {
+      "1": "PayRent"
+    },
+    "body": "Check your rent balance and savings progress on {{1}}."
+  },
+  {
+    "flowName": "payment_history",
+    "friendlyName": "payrent_payment_history",
+    "language": "en",
+    "approvalName": "payrent_payment_history",
+    "approvalCategory": "UTILITY",
+    "variables": {
+      "1": "PayRent"
+    },
+    "body": "View your recent rent payments and savings activity on {{1}}."
+  },
+  {
+    "flowName": "tenant_statement_request",
+    "friendlyName": "payrent_tenant_statement_request",
+    "language": "en",
+    "approvalName": "payrent_tenant_statement_request",
+    "approvalCategory": "UTILITY",
+    "variables": {
+      "1": "PayRent"
+    },
+    "body": "Request your rent statement from {{1}}. Choose the period you want included in your statement."
+  },
+  {
+    "flowName": "maintenance_issue",
+    "friendlyName": "payrent_maintenance_issue",
+    "language": "en",
+    "approvalName": "payrent_maintenance_issue",
+    "approvalCategory": "UTILITY",
+    "variables": {
+      "1": "PayRent"
+    },
+    "body": "Report a maintenance issue on {{1}}. Share the issue details and priority so the property team can follow up."
+  },
+  {
+    "flowName": "rent_reminder",
+    "friendlyName": "payrent_rent_reminder",
+    "language": "en",
+    "approvalName": "payrent_rent_reminder",
+    "approvalCategory": "UTILITY",
+    "variables": {
+      "1": "PayRent",
+      "2": "15000",
+      "3": "5"
+    },
+    "body": "Reminder from {{1}}: your rent target is KES {{2}} and your due day is {{3}}. Open PayRent to save or pay securely."
+  },
+  {
+    "flowName": "payment_receipt",
+    "friendlyName": "payrent_payment_receipt",
+    "language": "en",
+    "approvalName": "payrent_payment_receipt",
+    "approvalCategory": "UTILITY",
+    "variables": {
+      "1": "PayRent",
+      "2": "15000",
+      "3": "MPESA123"
+    },
+    "body": "{{1}} payment received: KES {{2}}. Reference: {{3}}. Thank you."
+  }
+]

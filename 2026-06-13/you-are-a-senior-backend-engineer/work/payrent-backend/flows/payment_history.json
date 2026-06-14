@@ -1,0 +1,38 @@
+{
+  "version": "7.1",
+  "data_api_version": "3.0",
+  "routing_model": { "PAYMENT_HISTORY": [] },
+  "screens": [
+    {
+      "id": "PAYMENT_HISTORY",
+      "title": "Payment History",
+      "terminal": true,
+      "success": true,
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "payment_history_form",
+            "children": [
+              { "type": "TextInput", "name": "tenant_phone_number", "label": "Phone number", "required": true, "input-type": "phone" },
+              { "type": "TextInput", "name": "limit", "label": "Number of payments", "required": false, "input-type": "number" },
+              {
+                "type": "Footer",
+                "label": "View history",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "flow_name": "payment_history",
+                    "tenant_phone_number": "${form.tenant_phone_number}",
+                    "limit": "${form.limit}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

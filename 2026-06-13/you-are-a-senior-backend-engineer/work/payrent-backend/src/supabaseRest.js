@@ -35,6 +35,13 @@ export class SupabaseRest {
     return Array.isArray(rows) ? rows[0] || null : rows;
   }
 
+  async rpc(functionName, payload) {
+    return this.request(`/rest/v1/rpc/${functionName}`, {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+  }
+
   async request(path, options) {
     const response = await fetch(`${this.url}${path}`, {
       ...options,

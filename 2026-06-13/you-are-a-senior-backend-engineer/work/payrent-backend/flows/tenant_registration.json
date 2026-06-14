@@ -1,0 +1,71 @@
+{
+  "version": "7.1",
+  "data_api_version": "3.0",
+  "routing_model": {
+    "TENANT_REGISTRATION": []
+  },
+  "screens": [
+    {
+      "id": "TENANT_REGISTRATION",
+      "title": "Tenant Registration",
+      "terminal": true,
+      "success": true,
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "tenant_registration_form",
+            "children": [
+              {
+                "type": "Dropdown",
+                "name": "has_invitation_code",
+                "label": "Invitation code?",
+                "required": true,
+                "data-source": [
+                  { "id": "no", "title": "No" },
+                  { "id": "yes", "title": "Yes" }
+                ]
+              },
+              {
+                "type": "TextInput",
+                "name": "invitation_code",
+                "label": "Invitation code",
+                "required": false,
+                "input-type": "text"
+              },
+              {
+                "type": "TextInput",
+                "name": "monthly_rent_amount",
+                "label": "Monthly rent amount",
+                "required": true,
+                "input-type": "number"
+              },
+              {
+                "type": "TextInput",
+                "name": "rent_due_day",
+                "label": "Rent due day",
+                "required": true,
+                "input-type": "number"
+              },
+              {
+                "type": "Footer",
+                "label": "Create profile",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "flow_name": "tenant_registration",
+                    "has_invitation_code": "${form.has_invitation_code}",
+                    "invitation_code": "${form.invitation_code}",
+                    "monthly_rent_amount": "${form.monthly_rent_amount}",
+                    "rent_due_day": "${form.rent_due_day}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

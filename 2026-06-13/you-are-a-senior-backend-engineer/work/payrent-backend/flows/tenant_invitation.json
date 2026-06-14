@@ -1,0 +1,44 @@
+{
+  "version": "7.1",
+  "data_api_version": "3.0",
+  "routing_model": { "TENANT_INVITATION": [] },
+  "screens": [
+    {
+      "id": "TENANT_INVITATION",
+      "title": "Invite Tenant",
+      "terminal": true,
+      "success": true,
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "tenant_invitation_form",
+            "children": [
+              { "type": "TextInput", "name": "owner_phone_number", "label": "Your phone number", "required": true, "input-type": "phone" },
+              { "type": "TextInput", "name": "property_id", "label": "Property ID", "required": true, "input-type": "text" },
+              { "type": "TextInput", "name": "unit_id", "label": "Unit ID", "required": true, "input-type": "text" },
+              { "type": "TextInput", "name": "tenant_phone_number", "label": "Tenant phone number", "required": true, "input-type": "phone" },
+              { "type": "TextInput", "name": "invitation_code", "label": "Invitation code", "required": false, "input-type": "text" },
+              {
+                "type": "Footer",
+                "label": "Invite tenant",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "flow_name": "tenant_invitation",
+                    "owner_phone_number": "${form.owner_phone_number}",
+                    "property_id": "${form.property_id}",
+                    "unit_id": "${form.unit_id}",
+                    "tenant_phone_number": "${form.tenant_phone_number}",
+                    "invitation_code": "${form.invitation_code}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

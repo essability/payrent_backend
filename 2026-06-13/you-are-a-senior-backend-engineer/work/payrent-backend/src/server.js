@@ -1,10 +1,17 @@
 import http from "node:http";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { AI_FALLBACK_REPLY, generatePayRentReply } from "./ai.js";
 import { getConfig } from "./config.js";
+import { extractTwilioFlowPayload, FlowProcessor } from "./flowProcessor.js";
 import { readForm, readJson, requireApiSecret, sendJson, sendText } from "./http.js";
-import { OnboardingEngine } from "./onboarding.js";
 import { PayRentService } from "./payrentService.js";
 import { SupabaseRest } from "./supabaseRest.js";
-import { normalizeWhatsAppPhone, twiml, validateTwilioSignature } from "./twilio.js";
+import { normalizeWhatsAppPhone, sendTwilioWhatsAppMessage, twiml, validateTwilioSignature } from "./twilio.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(__dirname, "..");
 
 const config = getConfig();
 const db = new SupabaseRest({
@@ -12,7 +19,28 @@ const db = new SupabaseRest({
   serviceRoleKey: config.supabaseServiceRoleKey
 });
 const service = new PayRentService(db);
-const onboarding = new OnboardingEngine(db, service);
+const flowProcessor = new FlowProcessor(service);
+
+const WELCOME_MENU = [
+  "🏠 Welcome to PayRent Kenya 🇰🇪",
+  "",
+  "We’re so happy to have you here.",
+  "",
+  "PayRent helps you manage rent, save towards rent, receive reminders, and make rent payments directly from WhatsApp — simple, safe, and stress-free.",
+  "",
+  "Please choose how you want to continue:",
+  "",
+  "1️⃣ I am a Tenant",
+  "2️⃣ I am a Landlord",
+  "3️⃣ I am a Property Manager",
+  "4️⃣ I just want to Save Towards Rent",
+  "",
+  "With love,",
+  "Ruth ❤️",
+  "CEO, PayRent Kenya",
+  "",
+  "Reply with 1, 2, 3, or 4."
+].join("\n");
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -20,6 +48,64 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/health") {
       sendJson(res, 200, { ok: true, service: "payrent-backend" });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/webhook/whatsapp") {
+      await handlePrimaryWhatsAppWebhook({ req, res });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/forms/tenant-registration") {
+      sendText(
+        res,
+        200,
+        renderTenantRegistrationForm({
+          phoneNumber: url.searchParams.get("phone") || "",
+          waId: url.searchParams.get("wa_id") || ""
+        }),
+        "text/html; charset=utf-8"
+      );
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/forms/save-towards-rent") {
+      sendText(
+        res,
+        200,
+        renderSaveTowardsRentForm({
+          phoneNumber: url.searchParams.get("phone") || "",
+          waId: url.searchParams.get("wa_id") || ""
+        }),
+        "text/html; charset=utf-8"
+      );
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/forms/tenant-registration") {
+      await handleFormSubmission({
+        req,
+        res,
+        flowName: "tenant_registration"
+      });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/forms/save-towards-rent") {
+      await handleFormSubmission({
+        req,
+        res,
+        flowName: "save_towards_rent"
+      });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname.startsWith("/api/flows/")) {
+      requireApiSecret(req, config);
+      const flowName = url.pathname.split("/").at(-1);
+      const filePath = path.join(projectRoot, "flows", `${flowName}.json`);
+      const file = await fs.readFile(filePath, "utf8");
+      sendJson(res, 200, JSON.parse(file));
       return;
     }
 
@@ -38,10 +124,92 @@ const server = http.createServer(async (req, res) => {
         return;
       }
 
-      const phoneNumber = normalizeWhatsAppPhone(form.From);
-      const message = form.Body || "";
-      const reply = await onboarding.handleWhatsAppMessage({ phoneNumber, body: message });
-      sendText(res, 200, twiml(reply), "text/xml; charset=utf-8");
+      await handlePrimaryWhatsAppWebhook({ req, res, preloadedForm: form });
+      return;
+    }
+
+    if (
+      req.method === "POST" &&
+      (url.pathname === "/webhooks/twilio/whatsapp-flow" || url.pathname === "/webhook/whatsapp-flow")
+    ) {
+      try {
+        const form = await readForm(req);
+        console.log("Incoming Twilio WhatsApp Flow webhook:", form);
+        const fullUrl = publicUrlFromRequest(req, url);
+        const valid = validateTwilioSignature({
+          authToken: config.twilioAuthToken,
+          url: fullUrl,
+          params: form,
+          signature: req.headers["x-twilio-signature"]
+        });
+
+        if (!valid) {
+          sendJson(res, 200, { ok: false, error: "Invalid Twilio signature" });
+          return;
+        }
+
+        const phoneNumber = normalizeWhatsAppPhone(form.From);
+        const profileName = form.ProfileName || "WhatsApp User";
+        const extracted = extractTwilioFlowPayload(form);
+        const result = await flowProcessor.process({
+          flowName: extracted.flowName,
+          source: "twilio_whatsapp_flow",
+          phoneNumber,
+          profileName,
+          payload: extracted.payload
+        });
+        const confirmation = flowProcessor.confirmationMessage(result.flowName, extracted.payload);
+
+        sendWhatsAppBodyInBackground({
+          to: phoneNumber,
+          body: confirmation
+        });
+
+        sendJson(res, 200, {
+          ok: true,
+          submissionId: result.submissionId,
+          flowName: result.flowName,
+          message: confirmation
+        });
+      } catch (error) {
+        console.error("WhatsApp Flow Webhook Error:", error);
+        sendJson(res, 200, { ok: false, error: "Flow submission could not be processed." });
+      }
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname.startsWith("/api/flows/") && url.pathname.endsWith("/submissions")) {
+      requireApiSecret(req, config);
+      const parts = url.pathname.split("/");
+      const flowName = parts[3];
+      const body = await readJson(req);
+      const result = await flowProcessor.process({
+        flowName,
+        source: body.source || "web",
+        phoneNumber: body.phoneNumber,
+        payload: body.payload || body
+      });
+      sendJson(res, 201, result);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/twilio/send-flow") {
+      requireApiSecret(req, config);
+      const body = await readJson(req);
+      const contentSid = body.contentSid || config.twilioFlowContentSids[body.flowName];
+      if (!contentSid) {
+        sendJson(res, 400, { error: "Missing contentSid. Provide contentSid or configure TWILIO_FLOW_CONTENT_SIDS for this flowName." });
+        return;
+      }
+      const result = await sendTwilioWhatsAppMessage({
+        accountSid: config.twilioAccountSid,
+        authToken: config.twilioAuthToken,
+        from: config.twilioWhatsAppFrom,
+        to: body.to,
+        contentSid,
+        contentVariables: body.contentVariables || {}
+      });
+      sendJson(res, 200, result);
       return;
     }
 
@@ -103,8 +271,1114 @@ server.listen(config.port, () => {
   console.log(`PayRent backend listening on http://localhost:${config.port}`);
 });
 
+async function handlePrimaryWhatsAppWebhook({ req, res, preloadedForm }) {
+  try {
+    console.log("Step 1");
+    const form = preloadedForm || await readForm(req);
+    console.log("Incoming Twilio WhatsApp webhook:", form);
+
+    console.log("Step 2");
+    const phoneNumber = normalizeWhatsAppPhone(form.From);
+    const waId = form.WaId || phoneNumber;
+    const profileName = form.ProfileName || "there";
+    const message = form.Body || "";
+    const decision = await decidePayRentWelcomeReply({
+      message,
+      phoneNumber,
+      profileName,
+      formBaseUrl: publicBaseUrlFromRequest(req)
+    });
+
+    console.log("Step 3");
+    sendText(res, 200, twiml(decision.reply), "text/xml; charset=utf-8");
+
+    handleWhatsAppWebhookInBackground({
+      phoneNumber,
+      waId,
+      profileName,
+      incomingMessage: message,
+      outgoingMessage: decision.reply,
+      decision
+    });
+  } catch (error) {
+    console.error("Webhook Error:", error);
+    sendText(res, 200, twiml(WELCOME_MENU), "text/xml; charset=utf-8");
+  }
+}
+
 function publicUrlFromRequest(req, url) {
   const proto = req.headers["x-forwarded-proto"] || "https";
   const host = req.headers["x-forwarded-host"] || req.headers.host;
   return `${proto}://${host}${url.pathname}`;
+}
+
+function publicBaseUrlFromRequest(req) {
+  if (config.publicBaseUrl) return config.publicBaseUrl.replace(/\/$/, "");
+  const proto = req.headers["x-forwarded-proto"] || "https";
+  const host = req.headers["x-forwarded-host"] || req.headers.host;
+  return `${proto}://${host}`;
+}
+
+async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, formBaseUrl }) {
+  const text = String(message || "").trim();
+  const normalized = text.toLowerCase();
+  const tenantFormUrl = buildFormUrl(formBaseUrl, "/forms/tenant-registration", phoneNumber);
+  const saveFormUrl = buildFormUrl(formBaseUrl, "/forms/save-towards-rent", phoneNumber);
+
+  const activeSession = await getActiveSessionForDecision(phoneNumber);
+  console.log("Loaded session", activeSession);
+
+  if (normalized === "cancel" && activeSession) {
+    await service.cancelOnboardingFlow(activeSession);
+    return {
+      reply: `${WELCOME_MENU}`,
+      selectedOption: null,
+      selectedUserType: null,
+      skipSessionUpdate: true
+    };
+  }
+
+  if (normalized === "menu") {
+    if (activeSession) await service.cancelOnboardingFlow(activeSession);
+    return {
+      reply: WELCOME_MENU,
+      selectedOption: null,
+      selectedUserType: null,
+      skipSessionUpdate: true
+    };
+  }
+
+  if (isRealActiveFlowSession(activeSession)) {
+    return continueFlow(activeSession, text);
+  }
+
+  if (isWelcomeTrigger(normalized)) {
+    return {
+      reply: WELCOME_MENU,
+      selectedOption: null,
+      selectedUserType: null,
+      skipSessionUpdate: true
+    };
+  }
+
+  if (normalized.startsWith("tenant:")) {
+    return {
+      reply: "Thank you ❤️ We’re creating your PayRent tenant profile now.",
+      fallbackFlowName: "tenant_registration",
+      fallbackPayload: parseColonCsvPayload(text, "tenant"),
+      skipSessionUpdate: true
+    };
+  }
+
+  if (normalized.startsWith("save:")) {
+    return {
+      reply: "Beautiful ❤️ We’re creating your rent savings goal now.",
+      fallbackFlowName: "save_towards_rent",
+      fallbackPayload: parseColonCsvPayload(text, "save"),
+      skipSessionUpdate: true
+    };
+  }
+
+  if (normalized === "1") {
+    const session = await service.startOnboardingFlow({
+      phoneNumber,
+      waId: phoneNumber,
+      flowType: "tenant",
+      selectedOption: "1",
+      step: "full_name",
+      data: {
+        flow_type: "tenant",
+        step: "full_name",
+        profile_name: profileName,
+        phone_number: phoneNumber,
+        mpesa_number: phoneNumber
+      }
+    });
+    console.log("Started session", session);
+
+    return {
+      reply: [
+        "Beautiful choice ❤️",
+        "",
+        "I’m sending the Tenant Registration WhatsApp form button now.",
+        "",
+        "If the button does not appear in Sandbox, we can continue here.",
+        "",
+        "Last resort web form:",
+        tenantFormUrl,
+        "",
+        "First, what is your full name?"
+      ].join("\n"),
+      selectedOption: "1",
+      selectedUserType: "tenant",
+      flowName: "tenant_registration",
+      currentStep: "full_name",
+      sessionData: session.data,
+      skipSessionUpdate: true
+    };
+  }
+
+  if (normalized === "4") {
+    const session = await service.startOnboardingFlow({
+      phoneNumber,
+      waId: phoneNumber,
+      flowType: "save_towards_rent",
+      selectedOption: "4",
+      step: "full_name",
+      data: {
+        flow_type: "save_towards_rent",
+        step: "full_name",
+        profile_name: profileName,
+        phone_number: phoneNumber,
+        mpesa_number: phoneNumber
+      }
+    });
+    console.log("Started session", session);
+
+    return {
+      reply: [
+        "Beautiful choice ❤️",
+        "",
+        "I’m sending the Save Towards Rent WhatsApp form button now.",
+        "",
+        "If the button does not appear in Sandbox, we can continue here.",
+        "",
+        "Last resort web form:",
+        saveFormUrl,
+        "",
+        "First, what is your full name?"
+      ].join("\n"),
+      selectedOption: "4",
+      selectedUserType: "save_towards_rent",
+      flowName: "save_towards_rent",
+      currentStep: "full_name",
+      sessionData: session.data,
+      skipSessionUpdate: true
+    };
+  }
+
+  if (normalized === "2") {
+    const session = await service.startOnboardingFlow({
+      phoneNumber,
+      waId: phoneNumber,
+      flowType: "landlord",
+      selectedOption: "2",
+      step: "full_name",
+      data: {
+        flow_type: "landlord",
+        step: "full_name",
+        profile_name: profileName,
+        phone_number: phoneNumber,
+        mpesa_number: phoneNumber
+      }
+    });
+    console.log("Started session", session);
+
+    return {
+      reply: [
+        "Beautiful choice ❤️",
+        "",
+        "Let’s register you as a PayRent landlord.",
+        "",
+        "First, what is your full name?"
+      ].join("\n"),
+      selectedOption: "2",
+      selectedUserType: "landlord",
+      currentStep: "full_name",
+      sessionData: session.data,
+      skipSessionUpdate: true
+    };
+  }
+
+  if (normalized === "3") {
+    const session = await service.startOnboardingFlow({
+      phoneNumber,
+      waId: phoneNumber,
+      flowType: "property_manager",
+      selectedOption: "3",
+      step: "full_name",
+      data: {
+        flow_type: "property_manager",
+        step: "full_name",
+        profile_name: profileName,
+        phone_number: phoneNumber,
+        mpesa_number: phoneNumber
+      }
+    });
+    console.log("Started session", session);
+
+    return {
+      reply: [
+        "Beautiful choice ❤️",
+        "",
+        "Let’s register you as a PayRent property manager.",
+        "",
+        "First, what is your full name?"
+      ].join("\n"),
+      selectedOption: "3",
+      selectedUserType: "property_manager",
+      currentStep: "full_name",
+      sessionData: session.data,
+      skipSessionUpdate: true
+    };
+  }
+
+  if (looksLikeRegistrationRequest(normalized)) {
+    return {
+      reply: AI_FALLBACK_REPLY,
+      selectedOption: null,
+      selectedUserType: null,
+      skipSessionUpdate: true
+    };
+  }
+
+  if (looksLikePaymentRequest(normalized)) {
+    return {
+      reply: "Rent payment through M-PESA is coming soon ❤️ For now, PayRent can help you register, save towards rent, track your goal, and receive reminders. Reply 1 for Tenant or 4 to Save Towards Rent.",
+      selectedOption: null,
+      selectedUserType: null,
+      skipSessionUpdate: true
+    };
+  }
+
+  const knownUser = await getKnownUserForDecision(phoneNumber);
+  if (!knownUser) {
+    return {
+      reply: WELCOME_MENU,
+      selectedOption: null,
+      selectedUserType: null,
+      skipSessionUpdate: true
+    };
+  }
+
+  const aiReply = await generateAiReplyForWhatsApp({ phoneNumber, userMessage: text });
+  return {
+    reply: aiReply,
+    selectedOption: null,
+    selectedUserType: "ai_assistant",
+    skipSessionUpdate: true
+  };
+}
+
+async function getKnownUserForDecision(phoneNumber) {
+  try {
+    return service.findUserByPhone(phoneNumber, { required: false });
+  } catch (error) {
+    console.error("Known User Lookup Error:", error);
+    return null;
+  }
+}
+
+function isWelcomeTrigger(normalized) {
+  return ["", "hi", "hello", "start", "menu", "hey", "good morning", "good afternoon", "good evening"].includes(normalized);
+}
+
+function looksLikeRegistrationRequest(normalized) {
+  return /\b(register|registration|sign up|signup|join|create account|open account)\b/.test(normalized);
+}
+
+function looksLikePaymentRequest(normalized) {
+  return /\b(pay|payment|mpesa|m-pesa|paid|send money|till|paybill)\b/.test(normalized);
+}
+
+async function generateAiReplyForWhatsApp({ phoneNumber, userMessage }) {
+  try {
+    const [userProfile, recentMessages] = await Promise.all([
+      service.getAiUserContext(phoneNumber),
+      service.getRecentMessagesForPhone(phoneNumber, 8)
+    ]);
+
+    return generatePayRentReply({
+      userMessage,
+      userProfile,
+      recentMessages,
+      apiKey: config.openaiApiKey,
+      model: config.openaiModel
+    });
+  } catch (error) {
+    console.error("AI Context Error:", error);
+    return AI_FALLBACK_REPLY;
+  }
+}
+
+function buildFormUrl(baseUrl, pathname, phoneNumber) {
+  const url = new URL(pathname, baseUrl);
+  if (phoneNumber) {
+    url.searchParams.set("phone", phoneNumber);
+    url.searchParams.set("wa_id", phoneNumber);
+  }
+  return url.toString();
+}
+
+async function getActiveSessionForDecision(phoneNumber) {
+  try {
+    return await service.getActiveOnboardingSession(phoneNumber);
+  } catch (error) {
+    console.error("Onboarding Session Lookup Error:", error);
+    return null;
+  }
+}
+
+async function continueFlow(session, message) {
+  const data = session.data || {};
+  const flowType = data.flow_type || session.selected_user_type;
+  const step = normalizeOnboardingStep(data.step || session.current_step);
+
+  console.log("Current flow", flowType);
+  console.log("Current step", step);
+  console.log("Incoming answer", message);
+
+  if (flowType === "tenant") {
+    return continueTenantFlow(session, data, step, message);
+  }
+
+  if (flowType === "save_towards_rent") {
+    return continueSaveTowardsRentFlow(session, data, step, message);
+  }
+
+  if (flowType === "landlord") {
+    return continueLandlordFlow(session, data, step, message);
+  }
+
+  if (flowType === "property_manager") {
+    return continuePropertyManagerFlow(session, data, step, message);
+  }
+
+  console.log("Next step", "choose_user_type");
+  return { reply: WELCOME_MENU, skipSessionUpdate: true };
+}
+
+async function continueTenantFlow(session, data, step, message) {
+  if (step === "full_name") {
+    const nextData = { ...data, full_name: message, step: "id_number" };
+    await service.advanceOnboardingFlow({ session, step: "id_number", data: nextData });
+    console.log("Next step", "id_number");
+    return { reply: "What is your ID number?", skipSessionUpdate: true };
+  }
+
+  if (step === "id_number") {
+    const nextData = { ...data, id_number: message, national_id_number: message, step: "invitation_code_question" };
+    await service.advanceOnboardingFlow({ session, step: "invitation_code_question", data: nextData });
+    console.log("Next step", "invitation_code_question");
+    return { reply: "Do you have an invitation code? Reply Yes or No.", skipSessionUpdate: true };
+  }
+
+  if (step === "invitation_code_question") {
+    const hasInvitation = ["yes", "y"].includes(message.toLowerCase());
+    const nextStep = hasInvitation ? "invitation_code" : "monthly_rent";
+    const nextData = {
+      ...data,
+      has_invitation_code: hasInvitation ? "yes" : "no",
+      step: nextStep
+    };
+    await service.advanceOnboardingFlow({ session, step: nextStep, data: nextData });
+    console.log("Next step", nextStep);
+    return {
+      reply: hasInvitation ? "Please enter your invitation code." : "What is your monthly rent amount?",
+      skipSessionUpdate: true
+    };
+  }
+
+  if (step === "invitation_code") {
+    const nextData = { ...data, invitation_code: message, step: "monthly_rent" };
+    await service.advanceOnboardingFlow({ session, step: "monthly_rent", data: nextData });
+    console.log("Next step", "monthly_rent");
+    return { reply: "What is your monthly rent amount?", skipSessionUpdate: true };
+  }
+
+  if (step === "monthly_rent") {
+    const nextData = { ...data, monthly_rent_amount: message, step: "due_day" };
+    await service.advanceOnboardingFlow({ session, step: "due_day", data: nextData });
+    console.log("Next step", "due_day");
+    return { reply: "What day of the month is rent due?", skipSessionUpdate: true };
+  }
+
+  if (step === "due_day") {
+    const payload = {
+      ...data,
+      rent_due_day: message,
+      phone_number: data.phone_number || session.phone_number,
+      full_name: data.full_name || data.profile_name || "WhatsApp User",
+      flow_name: "tenant_registration"
+    };
+    await service.advanceOnboardingFlow({ session, step: "complete", data: { ...payload, step: "complete" }, status: "completed" });
+    console.log("Next step", "complete");
+    return {
+      reply: "Registration complete. Beautiful ❤️ We’re creating your PayRent tenant profile now.",
+      fallbackFlowName: "tenant_registration",
+      fallbackPayload: payload,
+      completeSession: true,
+      skipSessionUpdate: true
+    };
+  }
+
+  console.log("Next step", "unknown");
+  return { reply: "Please reply MENU to restart or CANCEL to stop.", skipSessionUpdate: true };
+}
+
+async function continueLandlordFlow(session, data, step, message) {
+  if (step === "full_name") {
+    const nextData = { ...data, full_name: message, step: "id_number" };
+    await service.advanceOnboardingFlow({ session, step: "id_number", data: nextData });
+    console.log("Next step", "id_number");
+    return { reply: "What is your ID number?", skipSessionUpdate: true };
+  }
+
+  if (step === "id_number") {
+    const nextData = { ...data, id_number: message, national_id_number: message, step: "property_name" };
+    await service.advanceOnboardingFlow({ session, step: "property_name", data: nextData });
+    console.log("Next step", "property_name");
+    return { reply: "What is the name of your property?", skipSessionUpdate: true };
+  }
+
+  if (step === "property_name") {
+    const nextData = { ...data, property_name: message, step: "county" };
+    await service.advanceOnboardingFlow({ session, step: "county", data: nextData });
+    console.log("Next step", "county");
+    return { reply: "Which county is the property in?", skipSessionUpdate: true };
+  }
+
+  if (step === "county") {
+    const nextData = { ...data, county: message, step: "units" };
+    await service.advanceOnboardingFlow({ session, step: "units", data: nextData });
+    console.log("Next step", "units");
+    return { reply: "How many units do you manage at this property?", skipSessionUpdate: true };
+  }
+
+  if (step === "units") {
+    const nextData = { ...data, units_count: message, step: "payment_method" };
+    await service.advanceOnboardingFlow({ session, step: "payment_method", data: nextData });
+    console.log("Next step", "payment_method");
+    return { reply: "How do you currently receive rent? Reply M-PESA, Bank, or Cash.", skipSessionUpdate: true };
+  }
+
+  if (step === "payment_method") {
+    const payload = {
+      ...data,
+      payment_method: message,
+      phone_number: data.phone_number || session.phone_number,
+      full_name: data.full_name || data.profile_name || "WhatsApp User",
+      flow_name: "landlord_registration"
+    };
+    await service.advanceOnboardingFlow({ session, step: "complete", data: { ...payload, step: "complete" }, status: "completed" });
+    try {
+      await service.createLandlordFromChat(payload);
+    } catch (error) {
+      console.error("Landlord Flow Save Error:", error);
+      return {
+        reply: "Thank you ❤️ I received your landlord details, but I could not save them right now. Please reply MENU and try again in a moment.",
+        skipSessionUpdate: true
+      };
+    }
+    console.log("Next step", "complete");
+    return {
+      reply: [
+        `Thank you ${payload.full_name} ❤️`,
+        "",
+        "Your PayRent landlord profile has been created.",
+        "",
+        "You can now create properties, invite tenants, and track rent collections as we open more tools for you."
+      ].join("\n"),
+      skipSessionUpdate: true
+    };
+  }
+
+  console.log("Next step", "unknown");
+  return { reply: "Please reply MENU to restart or CANCEL to stop.", skipSessionUpdate: true };
+}
+
+async function continuePropertyManagerFlow(session, data, step, message) {
+  if (step === "full_name") {
+    const nextData = { ...data, full_name: message, step: "id_number" };
+    await service.advanceOnboardingFlow({ session, step: "id_number", data: nextData });
+    console.log("Next step", "id_number");
+    return { reply: "What is your ID number?", skipSessionUpdate: true };
+  }
+
+  if (step === "id_number") {
+    const nextData = { ...data, id_number: message, national_id_number: message, step: "company_name" };
+    await service.advanceOnboardingFlow({ session, step: "company_name", data: nextData });
+    console.log("Next step", "company_name");
+    return { reply: "What is your company name?", skipSessionUpdate: true };
+  }
+
+  if (step === "company_name") {
+    const nextData = { ...data, company_name: message, step: "properties_count" };
+    await service.advanceOnboardingFlow({ session, step: "properties_count", data: nextData });
+    console.log("Next step", "properties_count");
+    return { reply: "How many properties do you manage?", skipSessionUpdate: true };
+  }
+
+  if (step === "properties_count") {
+    const nextData = { ...data, properties_count: message, step: "county" };
+    await service.advanceOnboardingFlow({ session, step: "county", data: nextData });
+    console.log("Next step", "county");
+    return { reply: "Which county do you mainly operate in?", skipSessionUpdate: true };
+  }
+
+  if (step === "county") {
+    const payload = {
+      ...data,
+      county: message,
+      phone_number: data.phone_number || session.phone_number,
+      full_name: data.full_name || data.profile_name || "WhatsApp User",
+      flow_name: "property_manager_registration"
+    };
+    await service.advanceOnboardingFlow({ session, step: "complete", data: { ...payload, step: "complete" }, status: "completed" });
+    try {
+      await service.createPropertyManagerFromChat(payload);
+    } catch (error) {
+      console.error("Property Manager Flow Save Error:", error);
+      return {
+        reply: "Thank you ❤️ I received your property manager details, but I could not save them right now. Please reply MENU and try again in a moment.",
+        skipSessionUpdate: true
+      };
+    }
+    console.log("Next step", "complete");
+    return {
+      reply: [
+        `Thank you ${payload.full_name} ❤️`,
+        "",
+        "Your PayRent property manager profile has been created.",
+        "",
+        "You can now manage landlords, properties, tenants, and collections as we open more tools for you."
+      ].join("\n"),
+      skipSessionUpdate: true
+    };
+  }
+
+  console.log("Next step", "unknown");
+  return { reply: "Please reply MENU to restart or CANCEL to stop.", skipSessionUpdate: true };
+}
+
+function isRealActiveFlowSession(session) {
+  if (!session || session.status !== "active") return false;
+  const data = session.data || {};
+  const flowType = data.flow_type || session.selected_user_type;
+  const step = normalizeOnboardingStep(data.step || session.current_step);
+
+  return Boolean(
+    flowType &&
+    step &&
+    !["choose_user_type", "flow_launch_requested", "complete", "completed", "cancelled"].includes(step)
+  );
+}
+
+function normalizeOnboardingStep(step) {
+  const normalized = String(step || "").trim();
+  const aliases = {
+    chat_tenant_full_name: "full_name",
+    chat_save_full_name: "full_name",
+    chat_tenant_id_number: "id_number",
+    chat_save_id_number: "id_number",
+    chat_tenant_monthly_rent: "monthly_rent",
+    chat_save_monthly_rent: "monthly_rent",
+    chat_tenant_due_day: "due_day",
+    chat_save_due_day: "due_day"
+  };
+  return aliases[normalized] || normalized;
+}
+
+async function continueSaveTowardsRentFlow(session, data, step, message) {
+  if (step === "full_name") {
+    const nextData = { ...data, full_name: message, step: "id_number" };
+    await service.advanceOnboardingFlow({ session, step: "id_number", data: nextData });
+    console.log("Next step", "id_number");
+    return { reply: "What is your ID number?", skipSessionUpdate: true };
+  }
+
+  if (step === "id_number") {
+    const nextData = { ...data, id_number: message, national_id_number: message, step: "monthly_rent" };
+    await service.advanceOnboardingFlow({ session, step: "monthly_rent", data: nextData });
+    console.log("Next step", "monthly_rent");
+    return { reply: "What is your monthly rent amount?", skipSessionUpdate: true };
+  }
+
+  if (step === "monthly_rent") {
+    const nextData = { ...data, monthly_rent_amount: message, step: "due_day" };
+    await service.advanceOnboardingFlow({ session, step: "due_day", data: nextData });
+    console.log("Next step", "due_day");
+    return { reply: "What day of the month is rent due?", skipSessionUpdate: true };
+  }
+
+  if (step === "due_day") {
+    const nextData = { ...data, rent_due_day: message, step: "savings_frequency" };
+    await service.advanceOnboardingFlow({ session, step: "savings_frequency", data: nextData });
+    console.log("Next step", "savings_frequency");
+    return { reply: "How often do you want to save? Reply Daily, Weekly, or Monthly.", skipSessionUpdate: true };
+  }
+
+  if (step === "savings_frequency") {
+    const payload = {
+      ...data,
+      savings_frequency: message.toLowerCase(),
+      phone_number: data.phone_number || session.phone_number,
+      full_name: data.full_name || data.profile_name || "WhatsApp User",
+      flow_name: "save_towards_rent"
+    };
+    await service.advanceOnboardingFlow({ session, step: "complete", data: { ...payload, step: "complete" }, status: "completed" });
+    console.log("Next step", "complete");
+    return {
+      reply: "Registration complete. Beautiful ❤️ We’re creating your rent savings goal now.",
+      fallbackFlowName: "save_towards_rent",
+      fallbackPayload: payload,
+      completeSession: true,
+      skipSessionUpdate: true
+    };
+  }
+
+  console.log("Next step", "unknown");
+  return { reply: "Please reply MENU to restart or CANCEL to stop.", skipSessionUpdate: true };
+}
+
+function handleWhatsAppWebhookInBackground({ phoneNumber, waId, profileName, incomingMessage, outgoingMessage, decision }) {
+  setImmediate(async () => {
+    try {
+      console.log("WhatsApp background processing start");
+      await service.saveMessage({
+        phoneNumber,
+        direction: "user",
+        body: incomingMessage,
+        channel: "whatsapp"
+      });
+      await service.saveMessage({
+        phoneNumber,
+        direction: "assistant",
+        body: outgoingMessage,
+        channel: "whatsapp"
+      });
+      let activeSession = null;
+      if (!decision.skipSessionUpdate) {
+        await service.createOrUpdateMenuSession({
+          phoneNumber,
+          waId,
+          selectedOption: decision.selectedOption,
+          selectedUserType: decision.selectedUserType,
+          currentStep: decision.currentStep || (decision.flowName ? "flow_launch_requested" : "choose_user_type")
+        });
+        activeSession = await service.getActiveOnboardingSession(phoneNumber);
+        if (activeSession && decision.sessionData) {
+          await service.updateOnboardingSession({
+            id: activeSession.id,
+            currentStep: decision.currentStep || activeSession.current_step,
+            data: decision.sessionData,
+            selectedOption: decision.selectedOption,
+            selectedUserType: decision.selectedUserType,
+            status: decision.completeSession ? "completed" : "active"
+          });
+        }
+      } else {
+        activeSession = await service.getActiveOnboardingSession(phoneNumber);
+      }
+
+      if (decision.fallbackFlowName && decision.fallbackPayload) {
+        await processFallbackSubmission({
+          phoneNumber,
+          flowName: decision.fallbackFlowName,
+          payload: decision.fallbackPayload
+        });
+      }
+
+      if (decision.flowName) {
+        await launchWhatsAppFlowInBackground({
+          to: phoneNumber,
+          flowName: decision.flowName,
+          profileName,
+          phoneNumber,
+          sessionId: activeSession?.id
+        });
+      }
+
+      console.log("WhatsApp background processing complete");
+    } catch (error) {
+      console.error("Webhook Error:", error);
+    }
+  });
+}
+
+async function processFallbackSubmission({ phoneNumber, flowName, payload }) {
+  try {
+    const result = await flowProcessor.process({
+      flowName,
+      source: "whatsapp_chat_fallback",
+      phoneNumber,
+      payload
+    });
+    const confirmation = flowProcessor.confirmationMessage(result.flowName, payload);
+    await service.saveMessage({
+      phoneNumber,
+      direction: "assistant",
+      body: confirmation,
+      channel: "whatsapp"
+    });
+    await sendWhatsAppBody({ to: phoneNumber, body: confirmation });
+  } catch (error) {
+    console.error("Chat Fallback Error:", error);
+    const fallbackError = "Sorry, we could not complete that form by chat. Please reply 1 or 4 and try again.";
+    await service.saveMessage({
+      phoneNumber,
+      direction: "assistant",
+      body: fallbackError,
+      channel: "whatsapp"
+    });
+    await sendWhatsAppBody({ to: phoneNumber, body: fallbackError });
+  }
+}
+
+async function launchWhatsAppFlowInBackground({ to, flowName, profileName, phoneNumber, sessionId }) {
+  let contentSid = null;
+  try {
+    contentSid = config.twilioFlowContentSids[flowName] ||
+      (flowName === "save_towards_rent" ? config.twilioFlowContentSids.savings_deposit : null);
+
+    if (!contentSid) {
+      console.log(`No Twilio Content SID configured for ${flowName}; chat fallback remains available.`);
+      return;
+    }
+
+    await sendTwilioWhatsAppMessage({
+      accountSid: config.twilioAccountSid,
+      authToken: config.twilioAuthToken,
+      from: config.twilioWhatsAppFrom,
+      to,
+      contentSid,
+      contentVariables: buildNativeFlowContentVariables({ flowName, profileName, phoneNumber })
+    });
+    await service.saveMessage({
+      phoneNumber: to,
+      direction: "assistant",
+      body: `WhatsApp Flow launched: ${flowName}`,
+      channel: "whatsapp"
+    });
+    if (sessionId) {
+      const session = await service.getActiveOnboardingSession(phoneNumber);
+      await service.updateOnboardingSession({
+        id: sessionId,
+        currentStep: session?.current_step || "full_name",
+        data: {
+          ...(session?.data || {}),
+          native_flow_name: flowName
+        },
+        selectedOption: flowName === "tenant_registration" ? "1" : "4",
+        selectedUserType: flowName === "tenant_registration" ? "tenant" : "save_towards_rent",
+        nativeFlowAttempted: true,
+        nativeFlowContentSid: contentSid,
+        fallbackChatActive: true
+      });
+    }
+    console.log(`WhatsApp Flow launch requested for ${flowName}`);
+  } catch (error) {
+    console.error("Flow Launch Error:", error);
+    if (sessionId) {
+      try {
+        const session = await service.getActiveOnboardingSession(phoneNumber);
+        const selectedUserType = flowName === "tenant_registration" ? "tenant" : "save_towards_rent";
+        await service.updateOnboardingSession({
+          id: sessionId,
+          currentStep: session?.current_step || "full_name",
+          data: {
+            ...(session?.data || {}),
+            flow_type: session?.data?.flow_type || selectedUserType,
+            step: normalizeOnboardingStep(session?.data?.step || session?.current_step || "full_name"),
+            native_flow_name: flowName,
+            native_flow_error: error.message || String(error)
+          },
+          selectedOption: flowName === "tenant_registration" ? "1" : "4",
+          selectedUserType,
+          nativeFlowAttempted: true,
+          nativeFlowContentSid: contentSid,
+          fallbackChatActive: true
+        });
+      } catch (sessionError) {
+        console.error("Flow Launch Session Error:", sessionError);
+      }
+    }
+  }
+}
+
+function buildNativeFlowContentVariables({ flowName, profileName, phoneNumber }) {
+  return {
+    "1": profileName || "there",
+    "2": JSON.stringify({
+      flow_name: flowName,
+      full_name: profileName || "WhatsApp User",
+      phone_number: phoneNumber,
+      mpesa_number: phoneNumber
+    })
+  };
+}
+
+function sendWhatsAppBodyInBackground({ to, body }) {
+  setImmediate(async () => {
+    try {
+      await sendWhatsAppBody({ to, body });
+      await service.saveMessage({
+        phoneNumber: to,
+        direction: "assistant",
+        body,
+        channel: "whatsapp"
+      });
+    } catch (error) {
+      console.error("Outbound WhatsApp Error:", error);
+    }
+  });
+}
+
+async function sendWhatsAppBody({ to, body }) {
+  await sendTwilioWhatsAppMessage({
+    accountSid: config.twilioAccountSid,
+    authToken: config.twilioAuthToken,
+    from: config.twilioWhatsAppFrom,
+    to,
+    body
+  });
+}
+
+function parseColonCsvPayload(text, kind) {
+  const raw = text.slice(text.indexOf(":") + 1);
+  const parts = raw.split(",").map((part) => part.trim());
+
+  if (kind === "tenant") {
+    return {
+      flow_name: "tenant_registration",
+      full_name: parts[0],
+      phone_number: parts[1],
+      email: parts[2] === "-" ? "" : parts[2],
+      has_invitation_code: parts[3] && parts[3].toLowerCase() !== "no" ? "yes" : "no",
+      invitation_code: parts[3] && parts[3].toLowerCase() !== "no" ? parts[3] : "",
+      monthly_rent_amount: parts[4],
+      rent_due_day: parts[5]
+    };
+  }
+
+  return {
+    flow_name: "save_towards_rent",
+    full_name: parts[0],
+    phone_number: parts[1],
+    monthly_rent_amount: parts[2],
+    rent_due_day: parts[3],
+    savings_frequency: parts[4],
+    target_start_date: parts[5] === "-" ? "" : parts[5]
+  };
+}
+
+async function handleFormSubmission({ req, res, flowName }) {
+  try {
+    const form = await readForm(req);
+    console.log(`Incoming ${flowName} web form:`, form);
+    const payload = Object.fromEntries(
+      Object.entries(form).filter(([key]) => !["wa_id", "source"].includes(key))
+    );
+    const phoneNumber = payload.phone_number || payload.tenant_phone_number || form.phone || "";
+    const result = await flowProcessor.process({
+      flowName,
+      source: "whatsapp_in_app_web_form",
+      phoneNumber,
+      payload
+    });
+    const confirmation = flowProcessor.confirmationMessage(flowName, payload);
+
+    if (phoneNumber) {
+      sendWhatsAppBodyInBackground({
+        to: phoneNumber,
+        body: confirmation
+      });
+    }
+
+    sendText(res, 200, renderSuccessPage(confirmation), "text/html; charset=utf-8");
+    console.log(`${flowName} web form processed:`, result.submissionId);
+  } catch (error) {
+    console.error("Web Form Error:", error);
+    sendText(
+      res,
+      200,
+      renderSuccessPage("We received your form, but could not complete setup yet. Please return to WhatsApp and send Hi so we can help you continue."),
+      "text/html; charset=utf-8"
+    );
+  }
+}
+
+function renderTenantRegistrationForm({ phoneNumber, waId }) {
+  return renderFormPage({
+    title: "Tenant Registration",
+    intro: "Create your PayRent tenant profile and rent goal.",
+    action: "/forms/tenant-registration",
+    hidden: { wa_id: waId },
+    fields: [
+      inputField("Full Name", "full_name", "text", "", true),
+      inputField("Phone Number", "phone_number", "tel", phoneNumber, true),
+      inputField("Email", "email", "email", "", false),
+      selectField("Do you have an invitation code?", "has_invitation_code", [
+        ["no", "No"],
+        ["yes", "Yes"]
+      ]),
+      inputField("Invitation Code", "invitation_code", "text", "", false),
+      inputField("Monthly Rent Amount", "monthly_rent_amount", "number", "", true),
+      inputField("Rent Due Day", "rent_due_day", "number", "", true)
+    ],
+    submitLabel: "Create tenant profile"
+  });
+}
+
+function renderSaveTowardsRentForm({ phoneNumber, waId }) {
+  return renderFormPage({
+    title: "Save Towards Rent",
+    intro: "Create a rent savings goal that PayRent can help you track.",
+    action: "/forms/save-towards-rent",
+    hidden: { wa_id: waId },
+    fields: [
+      inputField("Full Name", "full_name", "text", "", true),
+      inputField("Phone Number", "phone_number", "tel", phoneNumber, true),
+      inputField("Monthly Rent Amount", "monthly_rent_amount", "number", "", true),
+      inputField("Rent Due Day", "rent_due_day", "number", "", true),
+      selectField("Savings Frequency", "savings_frequency", [
+        ["daily", "Daily"],
+        ["weekly", "Weekly"],
+        ["monthly", "Monthly"]
+      ]),
+      inputField("Target Start Date", "target_start_date", "date", "", false)
+    ],
+    submitLabel: "Create savings goal"
+  });
+}
+
+function renderFormPage({ title, intro, action, hidden, fields, submitLabel }) {
+  const hiddenFields = Object.entries(hidden || {})
+    .map(([name, value]) => `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`)
+    .join("");
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>${escapeHtml(title)} | PayRent Kenya</title>
+  <style>
+    :root { color-scheme: light; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f7f4ef;
+      color: #202124;
+    }
+    main {
+      width: min(100%, 520px);
+      margin: 0 auto;
+      padding: 24px 18px 34px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      line-height: 1.1;
+    }
+    p {
+      margin: 0 0 20px;
+      color: #5f6368;
+      line-height: 1.45;
+    }
+    form {
+      display: grid;
+      gap: 14px;
+    }
+    label {
+      display: grid;
+      gap: 6px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    input, select {
+      width: 100%;
+      border: 1px solid #d6d0c7;
+      border-radius: 8px;
+      padding: 13px 12px;
+      font-size: 16px;
+      background: white;
+      color: #202124;
+    }
+    button {
+      margin-top: 8px;
+      border: 0;
+      border-radius: 8px;
+      padding: 14px 16px;
+      font-size: 16px;
+      font-weight: 800;
+      background: #0f7b62;
+      color: white;
+    }
+    .brand {
+      font-weight: 800;
+      color: #0f7b62;
+      margin-bottom: 14px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand">PayRent Kenya</div>
+    <h1>${escapeHtml(title)}</h1>
+    <p>${escapeHtml(intro)}</p>
+    <form method="post" action="${escapeHtml(action)}">
+      ${hiddenFields}
+      ${fields.join("\n")}
+      <button type="submit">${escapeHtml(submitLabel)}</button>
+    </form>
+  </main>
+</body>
+</html>`;
+}
+
+function renderSuccessPage(message) {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PayRent Kenya</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f7f4ef;
+      color: #202124;
+    }
+    main {
+      width: min(100%, 520px);
+      margin: 0 auto;
+      padding: 36px 18px;
+    }
+    h1 { margin: 0 0 12px; font-size: 28px; }
+    p { white-space: pre-line; line-height: 1.5; color: #3c4043; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Done ❤️</h1>
+    <p>${escapeHtml(message)}</p>
+  </main>
+</body>
+</html>`;
+}
+
+function inputField(label, name, type, value, required) {
+  return `<label>${escapeHtml(label)}
+    <input type="${escapeHtml(type)}" name="${escapeHtml(name)}" value="${escapeHtml(value)}" ${required ? "required" : ""}>
+  </label>`;
+}
+
+function selectField(label, name, options) {
+  return `<label>${escapeHtml(label)}
+    <select name="${escapeHtml(name)}" required>
+      ${options.map(([value, text]) => `<option value="${escapeHtml(value)}">${escapeHtml(text)}</option>`).join("")}
+    </select>
+  </label>`;
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;");
 }

@@ -1,0 +1,64 @@
+{
+  "version": "7.1",
+  "data_api_version": "3.0",
+  "routing_model": {
+    "SAVE_TOWARDS_RENT": []
+  },
+  "screens": [
+    {
+      "id": "SAVE_TOWARDS_RENT",
+      "title": "Save Towards Rent",
+      "terminal": true,
+      "success": true,
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "save_towards_rent_form",
+            "children": [
+              {
+                "type": "TextInput",
+                "name": "monthly_rent_amount",
+                "label": "Monthly rent amount",
+                "required": true,
+                "input-type": "number"
+              },
+              {
+                "type": "TextInput",
+                "name": "rent_due_day",
+                "label": "Rent due day",
+                "required": true,
+                "input-type": "number"
+              },
+              {
+                "type": "Dropdown",
+                "name": "savings_frequency",
+                "label": "Savings frequency",
+                "required": true,
+                "data-source": [
+                  { "id": "daily", "title": "Daily" },
+                  { "id": "weekly", "title": "Weekly" },
+                  { "id": "monthly", "title": "Monthly" }
+                ]
+              },
+              {
+                "type": "Footer",
+                "label": "Create savings goal",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "flow_name": "save_towards_rent",
+                    "monthly_rent_amount": "${form.monthly_rent_amount}",
+                    "rent_due_day": "${form.rent_due_day}",
+                    "savings_frequency": "${form.savings_frequency}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

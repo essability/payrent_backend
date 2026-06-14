@@ -1,0 +1,56 @@
+{
+  "version": "7.1",
+  "data_api_version": "3.0",
+  "routing_model": { "MAINTENANCE_ISSUE": [] },
+  "screens": [
+    {
+      "id": "MAINTENANCE_ISSUE",
+      "title": "Maintenance Issue",
+      "terminal": true,
+      "success": true,
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "maintenance_issue_form",
+            "children": [
+              { "type": "TextInput", "name": "tenant_phone_number", "label": "Phone number", "required": true, "input-type": "phone" },
+              { "type": "TextInput", "name": "property_id", "label": "Property ID", "required": false, "input-type": "text" },
+              { "type": "TextInput", "name": "unit_id", "label": "Unit ID", "required": false, "input-type": "text" },
+              { "type": "TextInput", "name": "title", "label": "Issue title", "required": true, "input-type": "text" },
+              { "type": "TextArea", "name": "description", "label": "Description", "required": true },
+              {
+                "type": "Dropdown",
+                "name": "priority",
+                "label": "Priority",
+                "required": true,
+                "data-source": [
+                  { "id": "low", "title": "Low" },
+                  { "id": "normal", "title": "Normal" },
+                  { "id": "urgent", "title": "Urgent" }
+                ]
+              },
+              {
+                "type": "Footer",
+                "label": "Submit issue",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "flow_name": "maintenance_issue",
+                    "tenant_phone_number": "${form.tenant_phone_number}",
+                    "property_id": "${form.property_id}",
+                    "unit_id": "${form.unit_id}",
+                    "title": "${form.title}",
+                    "description": "${form.description}",
+                    "priority": "${form.priority}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
