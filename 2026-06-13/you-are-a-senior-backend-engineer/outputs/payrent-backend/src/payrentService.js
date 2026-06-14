@@ -743,6 +743,58 @@ export class PayRentService {
     });
   }
 
+  async getRecentMessagesForPhone(phoneNumber, limit = 8) {
+    const user = await this.findUserByPhone(phoneNumber, { required: false });
+    if (!user) return [];
+
+    const conversation = await this.db.select("conversations", {
+      query: `?user_id=${eq(user.id)}&channel=eq.whatsapp&select=id&order=created_at.desc&limit=1`,
+      single: true
+    });
+
+    if (!conversation) return [];
+
+    const messages = await this.db.select("messages", {
+      query: `?conversation_id=${eq(conversation.id)}&select=sender,message,created_at&order=created_at.desc&limit=${Number(limit) || 8}`
+    });
+
+    return messages.reverse();
+  }
+
+  async getAiUserContext(phoneNumber) {
+    const user = await this.findUserByPhone(phoneNumber, { required: false });
+    if (!user) {
+      return {
+        phone_number: phoneNumber,
+        is_known_user: false
+      };
+    }
+
+    const userRoles = await this.db.select("user_roles", {
+      query: `?user_id=${eq(user.id)}&select=roles(name)`
+    });
+    const roles = userRoles.map((row) => row.roles?.name).filter(Boolean);
+
+    const rentGoal = await this.db.select("rent_goals", {
+      query: `?tenant_user_id=${eq(user.id)}&is_active=eq.true&select=monthly_rent_amount,rent_due_day,amount_saved,target_month,savings_frequency,target_start_date&order=created_at.desc&limit=1`,
+      single: true
+    });
+
+    const outstandingBalance = rentGoal
+      ? Math.max(Number(rentGoal.monthly_rent_amount || 0) - Number(rentGoal.amount_saved || 0), 0)
+      : null;
+
+    return {
+      is_known_user: true,
+      name: user.full_name,
+      phone_number: user.phone_number,
+      roles,
+      rent_goal: rentGoal,
+      due_day: rentGoal?.rent_due_day || null,
+      outstanding_balance: outstandingBalance
+    };
+  }
+
   async updateOnboardingSession({ id, currentStep, data, selectedOption, selectedUserType, status = "active" }) {
     return this.db.update("onboarding_sessions", {
       current_step: currentStep,

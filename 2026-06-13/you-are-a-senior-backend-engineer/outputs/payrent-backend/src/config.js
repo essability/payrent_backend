@@ -8,7 +8,9 @@ export function getConfig() {
     twilioAccountSid: process.env.TWILIO_ACCOUNT_SID,
     twilioWhatsAppFrom: process.env.TWILIO_WHATSAPP_FROM,
     twilioFlowContentSids: parseJsonEnv(process.env.TWILIO_FLOW_CONTENT_SIDS, {}),
-    publicBaseUrl: process.env.PUBLIC_BASE_URL
+    publicBaseUrl: process.env.PUBLIC_BASE_URL,
+    openaiApiKey: process.env.OPENAI_API_KEY,
+    openaiModel: process.env.OPENAI_MODEL || "gpt-4o-mini"
   };
 
   const missing = [];

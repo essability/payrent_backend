@@ -2,6 +2,7 @@ import http from "node:http";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { AI_FALLBACK_REPLY, generatePayRentReply } from "./ai.js";
 import { getConfig } from "./config.js";
 import { extractTwilioFlowPayload, FlowProcessor } from "./flowProcessor.js";
 import { readForm, readJson, requireApiSecret, sendJson, sendText } from "./http.js";
@@ -327,6 +328,14 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, formBaseUrl }) 
     return advanceSaveChatSession(activeSession, text);
   }
 
+  if (isWelcomeTrigger(normalized)) {
+    return {
+      reply: WELCOME_MENU,
+      selectedOption: null,
+      selectedUserType: null
+    };
+  }
+
   if (normalized.startsWith("tenant:")) {
     return {
       reply: "Thank you ❤️ We’re creating your PayRent tenant profile now.",
@@ -403,11 +412,78 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, formBaseUrl }) 
     };
   }
 
+  if (looksLikeRegistrationRequest(normalized)) {
+    return {
+      reply: AI_FALLBACK_REPLY,
+      selectedOption: null,
+      selectedUserType: null
+    };
+  }
+
+  if (looksLikePaymentRequest(normalized)) {
+    return {
+      reply: "Rent payment through M-PESA is coming soon ❤️ For now, PayRent can help you register, save towards rent, track your goal, and receive reminders. Reply 1 for Tenant or 4 to Save Towards Rent.",
+      selectedOption: null,
+      selectedUserType: null
+    };
+  }
+
+  const knownUser = await getKnownUserForDecision(phoneNumber);
+  if (!knownUser) {
+    return {
+      reply: WELCOME_MENU,
+      selectedOption: null,
+      selectedUserType: null
+    };
+  }
+
+  const aiReply = await generateAiReplyForWhatsApp({ phoneNumber, userMessage: text });
   return {
-    reply: WELCOME_MENU,
+    reply: aiReply,
     selectedOption: null,
-    selectedUserType: null
+    selectedUserType: "ai_assistant"
   };
+}
+
+async function getKnownUserForDecision(phoneNumber) {
+  try {
+    return service.findUserByPhone(phoneNumber, { required: false });
+  } catch (error) {
+    console.error("Known User Lookup Error:", error);
+    return null;
+  }
+}
+
+function isWelcomeTrigger(normalized) {
+  return ["", "hi", "hello", "start", "menu", "hey", "good morning", "good afternoon", "good evening"].includes(normalized);
+}
+
+function looksLikeRegistrationRequest(normalized) {
+  return /\b(register|registration|sign up|signup|join|create account|open account)\b/.test(normalized);
+}
+
+function looksLikePaymentRequest(normalized) {
+  return /\b(pay|payment|mpesa|m-pesa|paid|send money|till|paybill)\b/.test(normalized);
+}
+
+async function generateAiReplyForWhatsApp({ phoneNumber, userMessage }) {
+  try {
+    const [userProfile, recentMessages] = await Promise.all([
+      service.getAiUserContext(phoneNumber),
+      service.getRecentMessagesForPhone(phoneNumber, 8)
+    ]);
+
+    return generatePayRentReply({
+      userMessage,
+      userProfile,
+      recentMessages,
+      apiKey: config.openaiApiKey,
+      model: config.openaiModel
+    });
+  } catch (error) {
+    console.error("AI Context Error:", error);
+    return AI_FALLBACK_REPLY;
+  }
 }
 
 function buildFormUrl(baseUrl, pathname, phoneNumber) {

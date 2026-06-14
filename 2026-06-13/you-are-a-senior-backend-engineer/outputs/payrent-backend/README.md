@@ -38,6 +38,8 @@ SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 API_SECRET=change-me
 PUBLIC_BASE_URL=https://your-railway-domain.up.railway.app
+OPENAI_API_KEY=your-openai-api-key
+OPENAI_MODEL=gpt-4o-mini
 TWILIO_AUTH_TOKEN=your-twilio-auth-token
 TWILIO_ACCOUNT_SID=your-twilio-account-sid
 TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
@@ -301,6 +303,61 @@ Landlord and property manager are intentionally held for the next build phase:
 ```text
 2
 3
+```
+
+## 3d. AI assistant test
+
+The WhatsApp webhook routes natural questions to the PayRent AI assistant when the user is not inside onboarding.
+
+Railway variables:
+
+```env
+OPENAI_API_KEY=your-openai-api-key
+OPENAI_MODEL=gpt-4o-mini
+```
+
+Manual tests from WhatsApp:
+
+```text
+Hi
+```
+
+Expected: warm PayRent welcome menu.
+
+```text
+1
+```
+
+Expected: Tenant onboarding path starts.
+
+After onboarding is complete or when the user is outside onboarding, send:
+
+```text
+How does PayRent help me save for rent?
+```
+
+Expected: short, warm PayRent support answer.
+
+Payment safety test:
+
+```text
+I want to pay rent with M-PESA
+```
+
+Expected: PayRent says M-PESA payment is coming soon and does not confirm payment.
+
+Registration routing test:
+
+```text
+I want to register
+```
+
+Expected: reply with menu guidance: `1` Tenant, `2` Landlord, `3` Property Manager, `4` Save Towards Rent.
+
+If OpenAI fails or `OPENAI_API_KEY` is missing, the webhook replies:
+
+```text
+Thank you for messaging PayRent ❤️ Please reply 1 for Tenant, 2 for Landlord, 3 for Property Manager, or 4 to Save Towards Rent.
 ```
 
 ## 4. WhatsApp registration flow
