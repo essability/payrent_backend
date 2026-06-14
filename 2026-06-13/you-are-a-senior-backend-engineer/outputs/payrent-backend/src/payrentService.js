@@ -535,7 +535,9 @@ export class PayRentService {
     return { user, invitation, assignment };
   }
 
-  async saveMessage({ phoneNumber, direction, body, channel = "whatsapp" }) {
+  async saveMessage({ phoneNumber, direction, body = "", channel = "whatsapp" }) {
+    const messageBody = body == null ? "" : String(body);
+
     let user = await this.db.select("users", {
       query: `?phone_number=${eq(phoneNumber)}&select=id`,
       single: true
@@ -567,7 +569,7 @@ export class PayRentService {
     await this.db.insert("messages", {
       conversation_id: conversation.id,
       sender: direction,
-      message: body
+      message: messageBody
     });
   }
 }
