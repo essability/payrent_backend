@@ -43,6 +43,7 @@ OPENAI_MODEL=gpt-4o-mini
 TWILIO_AUTH_TOKEN=your-twilio-auth-token
 TWILIO_ACCOUNT_SID=your-twilio-account-sid
 TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
+TWILIO_WHATSAPP_FLOW_IDS={"tenant_registration":"your_tenant_flow_id","save_towards_rent":"your_save_flow_id"}
 TWILIO_FLOW_CONTENT_SIDS={"tenant_registration":"HX...","save_towards_rent":"HX...","set_transaction_pin":"HX...","savings_deposit":"HX...","rent_payment":"HX..."}
 ```
 
@@ -74,11 +75,82 @@ Then use the HTTPS forwarding URL in Twilio.
 
 ## 3b. WhatsApp Flow setup
 
-Flow definitions are in:
+Native WhatsApp Flow screen definitions are in:
 
 ```text
 flows/tenant_registration.json
 flows/save_towards_rent.json
+```
+
+These two are the first native WhatsApp in-app forms:
+
+```text
+tenant_registration
+save_towards_rent
+```
+
+The fields are intentionally short. PayRent auto-uses:
+
+```text
+ProfileName as full name
+WaId/From as phone number
+Phone number as M-PESA number
+```
+
+The native Flow Content API payloads are in:
+
+```text
+twilio/native-flow-content-templates.json
+```
+
+They use Twilio's `twilio/flows` content type.
+
+Step 1: create/import the WhatsApp Flow screens in Twilio/Meta using:
+
+```text
+flows/tenant_registration.json
+flows/save_towards_rent.json
+```
+
+Copy the returned WhatsApp Flow IDs into:
+
+```bash
+export TWILIO_WHATSAPP_FLOW_IDS='{"tenant_registration":"YOUR_TENANT_FLOW_ID","save_towards_rent":"YOUR_SAVE_FLOW_ID"}'
+```
+
+Step 2: create the Twilio Content templates using `twilio/flows`:
+
+```bash
+export TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+export TWILIO_AUTH_TOKEN=your_twilio_auth_token
+export TWILIO_WHATSAPP_FLOW_IDS='{"tenant_registration":"YOUR_TENANT_FLOW_ID","save_towards_rent":"YOUR_SAVE_FLOW_ID"}'
+npm run twilio:native-flows:push
+```
+
+Step 3: create and submit for WhatsApp approval if your sender requires approval:
+
+```bash
+npm run twilio:native-flows:push-and-submit
+```
+
+The script writes:
+
+```text
+twilio/generated/twilio-native-flow-content-sids.json
+twilio/generated/railway-native-flows-env.txt
+```
+
+Copy the generated `TWILIO_FLOW_CONTENT_SIDS=...` value into Railway Variables.
+
+Step 4: configure the native Flow submission webhook:
+
+```text
+https://your-public-domain.com/webhook/whatsapp-flow
+```
+
+The older/general Flow and operational JSON definitions are also available:
+
+```text
 flows/landlord_registration.json
 flows/property_manager_registration.json
 flows/property_creation.json
@@ -142,7 +214,13 @@ export TWILIO_AUTH_TOKEN=your_twilio_auth_token
 npm run twilio:content:list
 ```
 
-Configure the Flow data/submission endpoint to:
+Configure the Flow data/submission endpoint to either:
+
+```text
+https://your-public-domain.com/webhook/whatsapp-flow
+```
+
+or:
 
 ```text
 https://your-public-domain.com/webhooks/twilio/whatsapp-flow

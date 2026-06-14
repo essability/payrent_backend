@@ -1,0 +1,34 @@
+[
+  {
+    "flowName": "tenant_registration",
+    "friendlyName": "payrent_native_tenant_registration_flow",
+    "language": "en",
+    "approvalName": "payrent_native_tenant_registration_flow",
+    "approvalCategory": "UTILITY",
+    "flowIdEnvKey": "tenant_registration",
+    "body": "Hi {{1}} 👋🏾\n\nPlease complete your PayRent tenant registration. We’ll use this WhatsApp number as your PayRent and M-PESA number.",
+    "buttonText": "Register as Tenant",
+    "flowToken": "{{2}}",
+    "navigateScreen": "TENANT_REGISTRATION",
+    "variables": {
+      "1": "Ruth",
+      "2": "{\"flow_name\":\"tenant_registration\",\"full_name\":\"Ruth\",\"phone_number\":\"+254700000000\",\"mpesa_number\":\"+254700000000\"}"
+    }
+  },
+  {
+    "flowName": "save_towards_rent",
+    "friendlyName": "payrent_native_save_towards_rent_flow",
+    "language": "en",
+    "approvalName": "payrent_native_save_towards_rent_flow",
+    "approvalCategory": "UTILITY",
+    "flowIdEnvKey": "save_towards_rent",
+    "body": "Hi {{1}} 👋🏾\n\nCreate your PayRent rent savings goal. We’ll use this WhatsApp number as your PayRent and M-PESA number.",
+    "buttonText": "Save Towards Rent",
+    "flowToken": "{{2}}",
+    "navigateScreen": "SAVE_TOWARDS_RENT",
+    "variables": {
+      "1": "Ruth",
+      "2": "{\"flow_name\":\"save_towards_rent\",\"full_name\":\"Ruth\",\"phone_number\":\"+254700000000\",\"mpesa_number\":\"+254700000000\"}"
+    }
+  }
+]

@@ -62,10 +62,12 @@ const server = http.createServer(async (req, res) => {
         console.log("Step 2");
         const phoneNumber = normalizeWhatsAppPhone(form.From);
         const waId = form.WaId || phoneNumber;
+        const profileName = form.ProfileName || "there";
         const message = form.Body || "";
         const decision = await decidePayRentWelcomeReply({
           message,
           phoneNumber,
+          profileName,
           formBaseUrl: publicBaseUrlFromRequest(req)
         });
 
@@ -75,6 +77,7 @@ const server = http.createServer(async (req, res) => {
         handleWhatsAppWebhookInBackground({
           phoneNumber,
           waId,
+          profileName,
           incomingMessage: message,
           outgoingMessage: decision.reply,
           decision
@@ -163,7 +166,10 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (req.method === "POST" && url.pathname === "/webhooks/twilio/whatsapp-flow") {
+    if (
+      req.method === "POST" &&
+      (url.pathname === "/webhooks/twilio/whatsapp-flow" || url.pathname === "/webhook/whatsapp-flow")
+    ) {
       try {
         const form = await readForm(req);
         console.log("Incoming Twilio WhatsApp Flow webhook:", form);
@@ -181,11 +187,13 @@ const server = http.createServer(async (req, res) => {
         }
 
         const phoneNumber = normalizeWhatsAppPhone(form.From);
+        const profileName = form.ProfileName || "WhatsApp User";
         const extracted = extractTwilioFlowPayload(form);
         const result = await flowProcessor.process({
           flowName: extracted.flowName,
           source: "twilio_whatsapp_flow",
           phoneNumber,
+          profileName,
           payload: extracted.payload
         });
         const confirmation = flowProcessor.confirmationMessage(result.flowName, extracted.payload);
@@ -314,7 +322,7 @@ function publicBaseUrlFromRequest(req) {
   return `${proto}://${host}`;
 }
 
-async function decidePayRentWelcomeReply({ message, phoneNumber, formBaseUrl }) {
+async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, formBaseUrl }) {
   const text = String(message || "").trim();
   const normalized = text.toLowerCase();
   const tenantFormUrl = buildFormUrl(formBaseUrl, "/forms/tenant-registration", phoneNumber);
@@ -357,12 +365,12 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, formBaseUrl }) 
       reply: [
         "Beautiful choice ❤️",
         "",
-        "I’m opening the Tenant Registration form for you now.",
+        "I’m sending the Tenant Registration WhatsApp form button now.",
         "",
-        "Tap here to fill it inside WhatsApp:",
+        "If the button does not appear in Sandbox, we can continue here.",
+        "",
+        "Last resort web form:",
         tenantFormUrl,
-        "",
-        "If the link does not open, no stress. We can continue here.",
         "",
         "First, what is your full name?"
       ].join("\n"),
@@ -379,12 +387,12 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, formBaseUrl }) 
       reply: [
         "Beautiful choice ❤️",
         "",
-        "I’m opening the Save Towards Rent form for you now.",
+        "I’m sending the Save Towards Rent WhatsApp form button now.",
         "",
-        "Tap here to fill it inside WhatsApp:",
+        "If the button does not appear in Sandbox, we can continue here.",
+        "",
+        "Last resort web form:",
         saveFormUrl,
-        "",
-        "If the link does not open, no stress. We can continue here.",
         "",
         "First, what is your full name?"
       ].join("\n"),
@@ -659,7 +667,7 @@ function advanceSaveChatSession(session, text) {
   return { reply: WELCOME_MENU };
 }
 
-function handleWhatsAppWebhookInBackground({ phoneNumber, waId, incomingMessage, outgoingMessage, decision }) {
+function handleWhatsAppWebhookInBackground({ phoneNumber, waId, profileName, incomingMessage, outgoingMessage, decision }) {
   setImmediate(async () => {
     try {
       console.log("WhatsApp background processing start");
@@ -705,7 +713,10 @@ function handleWhatsAppWebhookInBackground({ phoneNumber, waId, incomingMessage,
       if (decision.flowName) {
         await launchWhatsAppFlowInBackground({
           to: phoneNumber,
-          flowName: decision.flowName
+          flowName: decision.flowName,
+          profileName,
+          phoneNumber,
+          sessionId: activeSession?.id
         });
       }
 
@@ -745,9 +756,10 @@ async function processFallbackSubmission({ phoneNumber, flowName, payload }) {
   }
 }
 
-async function launchWhatsAppFlowInBackground({ to, flowName }) {
+async function launchWhatsAppFlowInBackground({ to, flowName, profileName, phoneNumber, sessionId }) {
+  let contentSid = null;
   try {
-    const contentSid = config.twilioFlowContentSids[flowName] ||
+    contentSid = config.twilioFlowContentSids[flowName] ||
       (flowName === "save_towards_rent" ? config.twilioFlowContentSids.savings_deposit : null);
 
     if (!contentSid) {
@@ -761,9 +773,7 @@ async function launchWhatsAppFlowInBackground({ to, flowName }) {
       from: config.twilioWhatsAppFrom,
       to,
       contentSid,
-      contentVariables: {
-        "1": "PayRent"
-      }
+      contentVariables: buildNativeFlowContentVariables({ flowName, profileName, phoneNumber })
     });
     await service.saveMessage({
       phoneNumber: to,
@@ -771,10 +781,52 @@ async function launchWhatsAppFlowInBackground({ to, flowName }) {
       body: `WhatsApp Flow launched: ${flowName}`,
       channel: "whatsapp"
     });
+    if (sessionId) {
+      await service.updateOnboardingSession({
+        id: sessionId,
+        currentStep: flowName === "tenant_registration" ? "chat_tenant_full_name" : "chat_save_full_name",
+        data: {
+          flow_name: flowName
+        },
+        selectedOption: flowName === "tenant_registration" ? "1" : "4",
+        selectedUserType: flowName,
+        nativeFlowAttempted: true,
+        nativeFlowContentSid: contentSid,
+        fallbackChatActive: true
+      });
+    }
     console.log(`WhatsApp Flow launch requested for ${flowName}`);
   } catch (error) {
     console.error("Flow Launch Error:", error);
+    if (sessionId) {
+      try {
+        await service.updateOnboardingSession({
+          id: sessionId,
+          currentStep: flowName === "tenant_registration" ? "chat_tenant_full_name" : "chat_save_full_name",
+          data: {},
+          selectedOption: flowName === "tenant_registration" ? "1" : "4",
+          selectedUserType: flowName,
+          nativeFlowAttempted: true,
+          nativeFlowContentSid: contentSid,
+          fallbackChatActive: true
+        });
+      } catch (sessionError) {
+        console.error("Flow Launch Session Error:", sessionError);
+      }
+    }
   }
+}
+
+function buildNativeFlowContentVariables({ flowName, profileName, phoneNumber }) {
+  return {
+    "1": profileName || "there",
+    "2": JSON.stringify({
+      flow_name: flowName,
+      full_name: profileName || "WhatsApp User",
+      phone_number: phoneNumber,
+      mpesa_number: phoneNumber
+    })
+  };
 }
 
 function sendWhatsAppBodyInBackground({ to, body }) {

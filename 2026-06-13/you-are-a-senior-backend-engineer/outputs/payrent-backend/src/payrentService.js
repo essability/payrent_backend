@@ -35,6 +35,7 @@ export class PayRentService {
       phone_number: phoneNumber,
       email: email || null,
       national_id_number: nationalIdNumber || null,
+      mpesa_number: phoneNumber,
       signup_channel: signupChannel
     }, {
       onConflict: "phone_number",
@@ -795,15 +796,21 @@ export class PayRentService {
     };
   }
 
-  async updateOnboardingSession({ id, currentStep, data, selectedOption, selectedUserType, status = "active" }) {
-    return this.db.update("onboarding_sessions", {
+  async updateOnboardingSession({ id, currentStep, data, selectedOption, selectedUserType, status = "active", nativeFlowAttempted, nativeFlowContentSid, fallbackChatActive }) {
+    const payload = {
       current_step: currentStep,
       data: data || {},
       selected_option: selectedOption || null,
       selected_user_type: selectedUserType || null,
       status,
       expires_at: new Date(Date.now() + 30 * 60 * 1000).toISOString()
-    }, `?id=${eq(id)}`);
+    };
+
+    if (nativeFlowAttempted !== undefined) payload.native_flow_attempted = nativeFlowAttempted;
+    if (nativeFlowContentSid !== undefined) payload.native_flow_content_sid = nativeFlowContentSid;
+    if (fallbackChatActive !== undefined) payload.fallback_chat_active = fallbackChatActive;
+
+    return this.db.update("onboarding_sessions", payload, `?id=${eq(id)}`);
   }
 }
 

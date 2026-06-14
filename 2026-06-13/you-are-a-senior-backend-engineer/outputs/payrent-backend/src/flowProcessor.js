@@ -21,13 +21,18 @@ export class FlowProcessor {
     this.service = service;
   }
 
-  async process({ flowName, source = "whatsapp", phoneNumber, payload }) {
+  async process({ flowName, source = "whatsapp", phoneNumber, profileName, payload }) {
     const normalizedFlowName = String(flowName || payload?.flow_name || "").trim();
     if (!FLOW_NAMES.has(normalizedFlowName)) {
       throw new Error(`Unsupported flow_name: ${normalizedFlowName || "missing"}`);
     }
 
-    const normalizedPayload = normalizePayload(payload);
+    const normalizedPayload = normalizePayload({
+      ...payload,
+      full_name: payload?.full_name || payload?.profile_name || profileName || "WhatsApp User",
+      phone_number: payload?.phone_number || payload?.tenant_phone_number || phoneNumber,
+      mpesa_number: payload?.mpesa_number || phoneNumber
+    });
     const submission = await this.service.createFlowSubmission({
       flowName: normalizedFlowName,
       source,
@@ -265,18 +270,36 @@ export function extractTwilioFlowPayload(form) {
     parsed = raw || {};
   }
 
+  const tokenPayload = parseMaybeJson(parsed.flow_token || parsed.flowToken || form.FlowToken || form.flow_token);
+  const dataPayload = parsed.data && typeof parsed.data === "object" ? parsed.data : {};
+  const mergedPayload = {
+    ...tokenPayload,
+    ...parsed,
+    ...dataPayload
+  };
+
   const flowName =
-    parsed.flow_name ||
-    parsed.flowName ||
+    mergedPayload.flow_name ||
+    mergedPayload.flowName ||
     form.FlowName ||
     form.flow_name ||
-    parsed.screen ||
-    parsed.name;
+    mergedPayload.screen ||
+    mergedPayload.name;
 
   return {
     flowName,
-    payload: parsed
+    payload: mergedPayload
   };
+}
+
+function parseMaybeJson(value) {
+  if (!value || typeof value !== "string") return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
 }
 
 function normalizePayload(payload) {

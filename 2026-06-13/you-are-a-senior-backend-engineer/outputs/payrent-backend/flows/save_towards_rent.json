@@ -19,36 +19,22 @@
             "children": [
               {
                 "type": "TextInput",
-                "name": "full_name",
-                "label": "Full Name",
-                "required": true,
-                "input-type": "text"
-              },
-              {
-                "type": "TextInput",
-                "name": "phone_number",
-                "label": "Phone Number",
-                "required": true,
-                "input-type": "phone"
-              },
-              {
-                "type": "TextInput",
                 "name": "monthly_rent_amount",
-                "label": "Monthly Rent Amount",
+                "label": "Monthly rent amount",
                 "required": true,
                 "input-type": "number"
               },
               {
                 "type": "TextInput",
                 "name": "rent_due_day",
-                "label": "Rent Due Day",
+                "label": "Rent due day",
                 "required": true,
                 "input-type": "number"
               },
               {
                 "type": "Dropdown",
                 "name": "savings_frequency",
-                "label": "Savings Frequency",
+                "label": "Savings frequency",
                 "required": true,
                 "data-source": [
                   { "id": "daily", "title": "Daily" },
@@ -57,25 +43,15 @@
                 ]
               },
               {
-                "type": "TextInput",
-                "name": "target_start_date",
-                "label": "Target Start Date",
-                "required": false,
-                "input-type": "text"
-              },
-              {
                 "type": "Footer",
                 "label": "Create savings goal",
                 "on-click-action": {
                   "name": "complete",
                   "payload": {
                     "flow_name": "save_towards_rent",
-                    "full_name": "${form.full_name}",
-                    "phone_number": "${form.phone_number}",
                     "monthly_rent_amount": "${form.monthly_rent_amount}",
                     "rent_due_day": "${form.rent_due_day}",
-                    "savings_frequency": "${form.savings_frequency}",
-                    "target_start_date": "${form.target_start_date}"
+                    "savings_frequency": "${form.savings_frequency}"
                   }
                 }
               }
