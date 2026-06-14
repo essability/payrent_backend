@@ -88,6 +88,53 @@ flows/maintenance_issue.json
 flows/twilio_content_templates.json
 ```
 
+Twilio outbound Content template definitions are in:
+
+```text
+twilio/content-templates.json
+```
+
+These templates are the messages Twilio sends to open or trigger each PayRent action from WhatsApp.
+
+To test the template payloads without calling Twilio:
+
+```bash
+npm run twilio:content:dry-run
+```
+
+To create the templates in Twilio:
+
+```bash
+export TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+export TWILIO_AUTH_TOKEN=your_twilio_auth_token
+npm run twilio:content:push
+```
+
+To create the templates and submit them for WhatsApp approval:
+
+```bash
+export TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+export TWILIO_AUTH_TOKEN=your_twilio_auth_token
+npm run twilio:content:push-and-submit
+```
+
+After the script runs, it writes:
+
+```text
+twilio/generated/twilio-flow-content-sids.json
+twilio/generated/railway-env.txt
+```
+
+Copy the `TWILIO_FLOW_CONTENT_SIDS=...` value from `twilio/generated/railway-env.txt` into Railway Variables.
+
+To list templates already created in Twilio:
+
+```bash
+export TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+export TWILIO_AUTH_TOKEN=your_twilio_auth_token
+npm run twilio:content:list
+```
+
 Configure the Flow data/submission endpoint to:
 
 ```text

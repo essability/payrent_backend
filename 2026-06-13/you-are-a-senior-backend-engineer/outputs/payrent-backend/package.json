@@ -5,7 +5,11 @@
   "private": true,
   "scripts": {
     "dev": "node --watch src/server.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "twilio:content:dry-run": "node scripts/push-twilio-content.js --dry-run",
+    "twilio:content:push": "node scripts/push-twilio-content.js",
+    "twilio:content:push-and-submit": "node scripts/push-twilio-content.js --submit-approval",
+    "twilio:content:list": "node scripts/list-twilio-content.js"
   },
   "engines": {
     "node": ">=20"

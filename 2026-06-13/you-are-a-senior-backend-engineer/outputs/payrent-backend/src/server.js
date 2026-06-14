@@ -31,6 +31,29 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "POST" && url.pathname === "/webhook/whatsapp") {
+      const form = await readForm(req);
+      console.log("Incoming Twilio WhatsApp webhook:", form);
+
+      const phoneNumber = normalizeWhatsAppPhone(form.From);
+      const message = form.Body || "";
+
+      await service.saveMessage({
+        phoneNumber,
+        direction: "user",
+        body: message,
+        channel: "whatsapp"
+      });
+
+      sendText(
+        res,
+        200,
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Response><Message>Welcome to PayRent Kenya 👋</Message></Response>",
+        "text/xml; charset=utf-8"
+      );
+      return;
+    }
+
     if (req.method === "GET" && url.pathname.startsWith("/api/flows/")) {
       requireApiSecret(req, config);
       const flowName = url.pathname.split("/").at(-1);
