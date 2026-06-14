@@ -1,0 +1,56 @@
+{
+  "version": "7.1",
+  "data_api_version": "3.0",
+  "routing_model": { "SAVINGS_DEPOSIT": [] },
+  "screens": [
+    {
+      "id": "SAVINGS_DEPOSIT",
+      "title": "Save Toward Rent",
+      "terminal": true,
+      "success": true,
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "savings_deposit_form",
+            "children": [
+              { "type": "TextInput", "name": "tenant_phone_number", "label": "Phone number", "required": true, "input-type": "phone" },
+              { "type": "TextInput", "name": "amount", "label": "Amount to save", "required": true, "input-type": "number" },
+              {
+                "type": "Dropdown",
+                "name": "method",
+                "label": "Payment method",
+                "required": true,
+                "data-source": [
+                  { "id": "mpesa", "title": "M-Pesa" },
+                  { "id": "bank_transfer", "title": "Bank Transfer" },
+                  { "id": "cash", "title": "Cash" },
+                  { "id": "card", "title": "Card" },
+                  { "id": "other", "title": "Other" }
+                ]
+              },
+              { "type": "TextInput", "name": "provider_reference", "label": "Payment reference", "required": false, "input-type": "text" },
+              { "type": "TextInput", "name": "transaction_pin", "label": "Transaction PIN", "required": true, "input-type": "number" },
+              {
+                "type": "Footer",
+                "label": "Save",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "flow_name": "savings_deposit",
+                    "tenant_phone_number": "${form.tenant_phone_number}",
+                    "amount": "${form.amount}",
+                    "method": "${form.method}",
+                    "provider_reference": "${form.provider_reference}",
+                    "transaction_pin": "${form.transaction_pin}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

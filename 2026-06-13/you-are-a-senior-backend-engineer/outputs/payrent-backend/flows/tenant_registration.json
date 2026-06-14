@@ -1,0 +1,76 @@
+{
+  "version": "7.1",
+  "data_api_version": "3.0",
+  "routing_model": {
+    "TENANT_REGISTRATION": []
+  },
+  "screens": [
+    {
+      "id": "TENANT_REGISTRATION",
+      "title": "Tenant Registration",
+      "terminal": true,
+      "success": true,
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "tenant_registration_form",
+            "children": [
+              {
+                "type": "TextInput",
+                "name": "full_name",
+                "label": "Full name",
+                "required": true,
+                "input-type": "text"
+              },
+              {
+                "type": "TextInput",
+                "name": "phone_number",
+                "label": "Phone number",
+                "required": true,
+                "input-type": "phone"
+              },
+              {
+                "type": "TextInput",
+                "name": "national_id_number",
+                "label": "Kenyan ID number",
+                "required": true,
+                "input-type": "number"
+              },
+              {
+                "type": "TextInput",
+                "name": "monthly_rent_amount",
+                "label": "Monthly rent amount",
+                "required": true,
+                "input-type": "number"
+              },
+              {
+                "type": "TextInput",
+                "name": "rent_due_day",
+                "label": "Rent due day",
+                "required": true,
+                "input-type": "number"
+              },
+              {
+                "type": "Footer",
+                "label": "Create rent goal",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "flow_name": "tenant_registration",
+                    "full_name": "${form.full_name}",
+                    "phone_number": "${form.phone_number}",
+                    "national_id_number": "${form.national_id_number}",
+                    "monthly_rent_amount": "${form.monthly_rent_amount}",
+                    "rent_due_day": "${form.rent_due_day}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

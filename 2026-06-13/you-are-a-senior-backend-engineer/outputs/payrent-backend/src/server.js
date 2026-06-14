@@ -1,10 +1,17 @@
 import http from "node:http";
+import fs from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { getConfig } from "./config.js";
+import { extractTwilioFlowPayload, FlowProcessor } from "./flowProcessor.js";
 import { readForm, readJson, requireApiSecret, sendJson, sendText } from "./http.js";
 import { OnboardingEngine } from "./onboarding.js";
 import { PayRentService } from "./payrentService.js";
 import { SupabaseRest } from "./supabaseRest.js";
-import { normalizeWhatsAppPhone, twiml, validateTwilioSignature } from "./twilio.js";
+import { normalizeWhatsAppPhone, sendTwilioWhatsAppMessage, twiml, validateTwilioSignature } from "./twilio.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(__dirname, "..");
 
 const config = getConfig();
 const db = new SupabaseRest({
@@ -13,6 +20,7 @@ const db = new SupabaseRest({
 });
 const service = new PayRentService(db);
 const onboarding = new OnboardingEngine(db, service);
+const flowProcessor = new FlowProcessor(service);
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -20,6 +28,15 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === "GET" && url.pathname === "/health") {
       sendJson(res, 200, { ok: true, service: "payrent-backend" });
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname.startsWith("/api/flows/")) {
+      requireApiSecret(req, config);
+      const flowName = url.pathname.split("/").at(-1);
+      const filePath = path.join(projectRoot, "flows", `${flowName}.json`);
+      const file = await fs.readFile(filePath, "utf8");
+      sendJson(res, 200, JSON.parse(file));
       return;
     }
 
@@ -42,6 +59,73 @@ const server = http.createServer(async (req, res) => {
       const message = form.Body || "";
       const reply = await onboarding.handleWhatsAppMessage({ phoneNumber, body: message });
       sendText(res, 200, twiml(reply), "text/xml; charset=utf-8");
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/webhooks/twilio/whatsapp-flow") {
+      const form = await readForm(req);
+      const fullUrl = publicUrlFromRequest(req, url);
+      const valid = validateTwilioSignature({
+        authToken: config.twilioAuthToken,
+        url: fullUrl,
+        params: form,
+        signature: req.headers["x-twilio-signature"]
+      });
+
+      if (!valid) {
+        sendText(res, 403, "Invalid Twilio signature");
+        return;
+      }
+
+      const phoneNumber = normalizeWhatsAppPhone(form.From);
+      const extracted = extractTwilioFlowPayload(form);
+      const result = await flowProcessor.process({
+        flowName: extracted.flowName,
+        source: "twilio_whatsapp_flow",
+        phoneNumber,
+        payload: extracted.payload
+      });
+
+      sendJson(res, 200, {
+        ok: true,
+        submissionId: result.submissionId,
+        flowName: result.flowName
+      });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname.startsWith("/api/flows/") && url.pathname.endsWith("/submissions")) {
+      requireApiSecret(req, config);
+      const parts = url.pathname.split("/");
+      const flowName = parts[3];
+      const body = await readJson(req);
+      const result = await flowProcessor.process({
+        flowName,
+        source: body.source || "web",
+        phoneNumber: body.phoneNumber,
+        payload: body.payload || body
+      });
+      sendJson(res, 201, result);
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/api/twilio/send-flow") {
+      requireApiSecret(req, config);
+      const body = await readJson(req);
+      const contentSid = body.contentSid || config.twilioFlowContentSids[body.flowName];
+      if (!contentSid) {
+        sendJson(res, 400, { error: "Missing contentSid. Provide contentSid or configure TWILIO_FLOW_CONTENT_SIDS for this flowName." });
+        return;
+      }
+      const result = await sendTwilioWhatsAppMessage({
+        accountSid: config.twilioAccountSid,
+        authToken: config.twilioAuthToken,
+        from: config.twilioWhatsAppFrom,
+        to: body.to,
+        contentSid,
+        contentVariables: body.contentVariables || {}
+      });
+      sendJson(res, 200, result);
       return;
     }
 

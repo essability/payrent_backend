@@ -1,0 +1,88 @@
+{
+  "version": "7.1",
+  "data_api_version": "3.0",
+  "routing_model": {
+    "LANDLORD_REGISTRATION": []
+  },
+  "screens": [
+    {
+      "id": "LANDLORD_REGISTRATION",
+      "title": "Landlord Registration",
+      "terminal": true,
+      "success": true,
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "landlord_registration_form",
+            "children": [
+              {
+                "type": "TextInput",
+                "name": "full_name",
+                "label": "Full name",
+                "required": true,
+                "input-type": "text"
+              },
+              {
+                "type": "TextInput",
+                "name": "phone_number",
+                "label": "Phone number",
+                "required": true,
+                "input-type": "phone"
+              },
+              {
+                "type": "TextInput",
+                "name": "email",
+                "label": "Email",
+                "required": true,
+                "input-type": "email"
+              },
+              {
+                "type": "TextInput",
+                "name": "national_id_number",
+                "label": "Kenyan ID number",
+                "required": true,
+                "input-type": "number"
+              },
+              {
+                "type": "Dropdown",
+                "name": "landlord_type",
+                "label": "Landlord type",
+                "required": true,
+                "data-source": [
+                  { "id": "individual_landlord", "title": "Individual Landlord" },
+                  { "id": "company", "title": "Company" },
+                  { "id": "property_owner", "title": "Property Owner" }
+                ]
+              },
+              {
+                "type": "TextInput",
+                "name": "company_name",
+                "label": "Company name",
+                "required": false,
+                "input-type": "text"
+              },
+              {
+                "type": "Footer",
+                "label": "Create landlord account",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "flow_name": "landlord_registration",
+                    "full_name": "${form.full_name}",
+                    "phone_number": "${form.phone_number}",
+                    "email": "${form.email}",
+                    "national_id_number": "${form.national_id_number}",
+                    "landlord_type": "${form.landlord_type}",
+                    "company_name": "${form.company_name}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

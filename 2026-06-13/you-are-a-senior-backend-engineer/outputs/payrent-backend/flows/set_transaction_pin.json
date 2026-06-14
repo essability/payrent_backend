@@ -1,0 +1,40 @@
+{
+  "version": "7.1",
+  "data_api_version": "3.0",
+  "routing_model": { "SET_TRANSACTION_PIN": [] },
+  "screens": [
+    {
+      "id": "SET_TRANSACTION_PIN",
+      "title": "Set Transaction PIN",
+      "terminal": true,
+      "success": true,
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "set_transaction_pin_form",
+            "children": [
+              { "type": "TextInput", "name": "phone_number", "label": "Phone number", "required": true, "input-type": "phone" },
+              { "type": "TextInput", "name": "pin", "label": "New PIN", "required": true, "input-type": "number" },
+              { "type": "TextInput", "name": "confirm_pin", "label": "Confirm PIN", "required": true, "input-type": "number" },
+              {
+                "type": "Footer",
+                "label": "Save PIN",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "flow_name": "set_transaction_pin",
+                    "phone_number": "${form.phone_number}",
+                    "pin": "${form.pin}",
+                    "confirm_pin": "${form.confirm_pin}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

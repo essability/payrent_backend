@@ -1,0 +1,40 @@
+{
+  "version": "7.1",
+  "data_api_version": "3.0",
+  "routing_model": { "TENANT_STATEMENT_REQUEST": [] },
+  "screens": [
+    {
+      "id": "TENANT_STATEMENT_REQUEST",
+      "title": "Request Statement",
+      "terminal": true,
+      "success": true,
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "tenant_statement_request_form",
+            "children": [
+              { "type": "TextInput", "name": "tenant_phone_number", "label": "Phone number", "required": true, "input-type": "phone" },
+              { "type": "TextInput", "name": "period_start", "label": "Start date YYYY-MM-DD", "required": false, "input-type": "text" },
+              { "type": "TextInput", "name": "period_end", "label": "End date YYYY-MM-DD", "required": false, "input-type": "text" },
+              {
+                "type": "Footer",
+                "label": "Request statement",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "flow_name": "tenant_statement_request",
+                    "tenant_phone_number": "${form.tenant_phone_number}",
+                    "period_start": "${form.period_start}",
+                    "period_end": "${form.period_end}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

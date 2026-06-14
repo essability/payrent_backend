@@ -1,0 +1,58 @@
+{
+  "tenant_registration": {
+    "description": "Register an independent tenant and create a rent goal.",
+    "railway_env": "TWILIO_FLOW_CONTENT_SIDS.tenant_registration"
+  },
+  "landlord_registration": {
+    "description": "Register a landlord account.",
+    "railway_env": "TWILIO_FLOW_CONTENT_SIDS.landlord_registration"
+  },
+  "property_manager_registration": {
+    "description": "Register a property manager account.",
+    "railway_env": "TWILIO_FLOW_CONTENT_SIDS.property_manager_registration"
+  },
+  "property_creation": {
+    "description": "Create a property and first unit.",
+    "railway_env": "TWILIO_FLOW_CONTENT_SIDS.property_creation"
+  },
+  "unit_creation": {
+    "description": "Create an additional property unit.",
+    "railway_env": "TWILIO_FLOW_CONTENT_SIDS.unit_creation"
+  },
+  "tenant_invitation": {
+    "description": "Invite a tenant to a property unit.",
+    "railway_env": "TWILIO_FLOW_CONTENT_SIDS.tenant_invitation"
+  },
+  "set_transaction_pin": {
+    "description": "Set or reset a transaction PIN.",
+    "railway_env": "TWILIO_FLOW_CONTENT_SIDS.set_transaction_pin"
+  },
+  "savings_deposit": {
+    "description": "Save money toward rent.",
+    "railway_env": "TWILIO_FLOW_CONTENT_SIDS.savings_deposit"
+  },
+  "rent_goal_update": {
+    "description": "Update monthly rent goal details.",
+    "railway_env": "TWILIO_FLOW_CONTENT_SIDS.rent_goal_update"
+  },
+  "rent_payment": {
+    "description": "Pay or record rent payment.",
+    "railway_env": "TWILIO_FLOW_CONTENT_SIDS.rent_payment"
+  },
+  "rent_balance_check": {
+    "description": "Check rent balance or savings progress.",
+    "railway_env": "TWILIO_FLOW_CONTENT_SIDS.rent_balance_check"
+  },
+  "payment_history": {
+    "description": "Request payment history.",
+    "railway_env": "TWILIO_FLOW_CONTENT_SIDS.payment_history"
+  },
+  "tenant_statement_request": {
+    "description": "Request a tenant statement.",
+    "railway_env": "TWILIO_FLOW_CONTENT_SIDS.tenant_statement_request"
+  },
+  "maintenance_issue": {
+    "description": "Report a maintenance issue.",
+    "railway_env": "TWILIO_FLOW_CONTENT_SIDS.maintenance_issue"
+  }
+}

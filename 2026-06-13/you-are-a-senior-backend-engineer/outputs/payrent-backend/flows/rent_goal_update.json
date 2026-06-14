@@ -1,0 +1,42 @@
+{
+  "version": "7.1",
+  "data_api_version": "3.0",
+  "routing_model": { "RENT_GOAL_UPDATE": [] },
+  "screens": [
+    {
+      "id": "RENT_GOAL_UPDATE",
+      "title": "Update Rent Goal",
+      "terminal": true,
+      "success": true,
+      "layout": {
+        "type": "SingleColumnLayout",
+        "children": [
+          {
+            "type": "Form",
+            "name": "rent_goal_update_form",
+            "children": [
+              { "type": "TextInput", "name": "tenant_phone_number", "label": "Phone number", "required": true, "input-type": "phone" },
+              { "type": "TextInput", "name": "monthly_rent_amount", "label": "Monthly rent amount", "required": true, "input-type": "number" },
+              { "type": "TextInput", "name": "rent_due_day", "label": "Rent due day", "required": true, "input-type": "number" },
+              { "type": "TextInput", "name": "transaction_pin", "label": "Transaction PIN", "required": true, "input-type": "number" },
+              {
+                "type": "Footer",
+                "label": "Update goal",
+                "on-click-action": {
+                  "name": "complete",
+                  "payload": {
+                    "flow_name": "rent_goal_update",
+                    "tenant_phone_number": "${form.tenant_phone_number}",
+                    "monthly_rent_amount": "${form.monthly_rent_amount}",
+                    "rent_due_day": "${form.rent_due_day}",
+                    "transaction_pin": "${form.transaction_pin}"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}
