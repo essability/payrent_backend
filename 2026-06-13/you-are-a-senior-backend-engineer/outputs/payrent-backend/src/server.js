@@ -32,25 +32,29 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && url.pathname === "/webhook/whatsapp") {
-      const form = await readForm(req);
-      console.log("Incoming Twilio WhatsApp webhook:", form);
+      const welcomeTwiml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Response><Message>Welcome to PayRent Kenya 👋</Message></Response>";
 
-      const phoneNumber = normalizeWhatsAppPhone(form.From);
-      const message = form.Body || "";
+      try {
+        console.log("Step 1");
+        const form = await readForm(req);
+        console.log("Incoming Twilio WhatsApp webhook:", form);
 
-      await service.saveMessage({
-        phoneNumber,
-        direction: "user",
-        body: message,
-        channel: "whatsapp"
-      });
+        console.log("Step 2");
+        const phoneNumber = normalizeWhatsAppPhone(form.From);
+        const message = form.Body || "";
 
-      sendText(
-        res,
-        200,
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?><Response><Message>Welcome to PayRent Kenya 👋</Message></Response>",
-        "text/xml; charset=utf-8"
-      );
+        console.log("Step 3");
+        await service.saveMessage({
+          phoneNumber,
+          direction: "user",
+          body: message,
+          channel: "whatsapp"
+        });
+      } catch (error) {
+        console.error("Webhook Error:", error);
+      }
+
+      sendText(res, 200, welcomeTwiml, "text/xml; charset=utf-8");
       return;
     }
 
