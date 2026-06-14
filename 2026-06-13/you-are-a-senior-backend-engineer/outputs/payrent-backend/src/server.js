@@ -44,12 +44,10 @@ const server = http.createServer(async (req, res) => {
         const message = form.Body || "";
 
         console.log("Step 3");
-        await service.saveMessage({
-          phoneNumber,
-          direction: "user",
-          body: message,
-          channel: "whatsapp"
-        });
+        sendText(res, 200, welcomeTwiml, "text/xml; charset=utf-8");
+
+        saveIncomingWhatsAppMessageInBackground({ phoneNumber, message });
+        return;
       } catch (error) {
         console.error("Webhook Error:", error);
       }
@@ -218,4 +216,21 @@ function publicUrlFromRequest(req, url) {
   const proto = req.headers["x-forwarded-proto"] || "https";
   const host = req.headers["x-forwarded-host"] || req.headers.host;
   return `${proto}://${host}${url.pathname}`;
+}
+
+function saveIncomingWhatsAppMessageInBackground({ phoneNumber, message }) {
+  setImmediate(async () => {
+    try {
+      console.log("Background save start");
+      await service.saveMessage({
+        phoneNumber,
+        direction: "user",
+        body: message,
+        channel: "whatsapp"
+      });
+      console.log("Background save complete");
+    } catch (error) {
+      console.error("Webhook Error:", error);
+    }
+  });
 }
