@@ -438,6 +438,56 @@ If OpenAI fails or `OPENAI_API_KEY` is missing, the webhook replies:
 Thank you for messaging PayRent ❤️ Please reply 1 for Tenant, 2 for Landlord, 3 for Property Manager, or 4 to Save Towards Rent.
 ```
 
+## 3e. Onboarding state-machine test
+
+Tenant fallback chat must not restart after the user gives their name:
+
+```text
+Hi
+1
+Essien
+12345678
+No
+15000
+5
+```
+
+Expected sequence:
+
+```text
+First, what is your full name?
+What is your ID number?
+Do you have an invitation code? Reply Yes or No.
+What is your monthly rent amount?
+What day of the month is rent due?
+Registration complete.
+```
+
+Save Towards Rent fallback chat:
+
+```text
+MENU
+4
+Essien
+12345678
+15000
+5
+Weekly
+```
+
+Expected sequence:
+
+```text
+First, what is your full name?
+What is your ID number?
+What is your monthly rent amount?
+What day of the month is rent due?
+How often do you want to save? Reply Daily, Weekly, or Monthly.
+Registration complete.
+```
+
+During an active flow, replies like `1`, `2`, `3`, or `4` are treated as answers, not menu selections. Use `MENU` to restart or `CANCEL` to cancel.
+
 ## 4. WhatsApp registration flow
 
 Independent tenant:

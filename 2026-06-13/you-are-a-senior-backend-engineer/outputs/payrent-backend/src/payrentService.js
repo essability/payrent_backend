@@ -744,6 +744,58 @@ export class PayRentService {
     });
   }
 
+  async startOnboardingFlow({ phoneNumber, waId, flowType, selectedOption, step = "full_name", data = {} }) {
+    const existing = await this.getActiveOnboardingSession(phoneNumber);
+    const sessionData = {
+      ...data,
+      flow_type: flowType,
+      step
+    };
+
+    if (existing) {
+      return this.db.update("onboarding_sessions", {
+        wa_id: waId || existing.wa_id || null,
+        selected_option: selectedOption,
+        selected_user_type: flowType,
+        current_step: step,
+        data: sessionData,
+        status: "active",
+        expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+      }, `?id=${eq(existing.id)}`);
+    }
+
+    return this.db.insert("onboarding_sessions", {
+      phone_number: phoneNumber,
+      wa_id: waId || null,
+      flow: flowType === "tenant" ? "independent_tenant" : "independent_tenant",
+      status: "active",
+      current_step: step,
+      selected_option: selectedOption,
+      selected_user_type: flowType,
+      data: sessionData,
+      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+    });
+  }
+
+  async advanceOnboardingFlow({ session, step, data, status = "active" }) {
+    return this.db.update("onboarding_sessions", {
+      current_step: step,
+      data: {
+        ...(data || {}),
+        step
+      },
+      status,
+      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
+    }, `?id=${eq(session.id)}`);
+  }
+
+  async cancelOnboardingFlow(session) {
+    return this.db.update("onboarding_sessions", {
+      status: "cancelled",
+      current_step: "cancelled"
+    }, `?id=${eq(session.id)}`);
+  }
+
   async getRecentMessagesForPhone(phoneNumber, limit = 8) {
     const user = await this.findUserByPhone(phoneNumber, { required: false });
     if (!user) return [];

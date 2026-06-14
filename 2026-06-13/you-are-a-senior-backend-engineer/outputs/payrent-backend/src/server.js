@@ -329,11 +329,30 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, fo
   const saveFormUrl = buildFormUrl(formBaseUrl, "/forms/save-towards-rent", phoneNumber);
 
   const activeSession = await getActiveSessionForDecision(phoneNumber);
-  if (activeSession?.current_step?.startsWith("chat_tenant_")) {
-    return advanceTenantChatSession(activeSession, text);
+  console.log("Loaded session", activeSession);
+
+  if (normalized === "cancel" && activeSession) {
+    await service.cancelOnboardingFlow(activeSession);
+    return {
+      reply: `${WELCOME_MENU}`,
+      selectedOption: null,
+      selectedUserType: null,
+      skipSessionUpdate: true
+    };
   }
-  if (activeSession?.current_step?.startsWith("chat_save_")) {
-    return advanceSaveChatSession(activeSession, text);
+
+  if (normalized === "menu") {
+    if (activeSession) await service.cancelOnboardingFlow(activeSession);
+    return {
+      reply: WELCOME_MENU,
+      selectedOption: null,
+      selectedUserType: null,
+      skipSessionUpdate: true
+    };
+  }
+
+  if (activeSession?.status === "active") {
+    return continueFlow(activeSession, text);
   }
 
   if (isWelcomeTrigger(normalized)) {
@@ -361,6 +380,22 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, fo
   }
 
   if (normalized === "1") {
+    const session = await service.startOnboardingFlow({
+      phoneNumber,
+      waId: phoneNumber,
+      flowType: "tenant",
+      selectedOption: "1",
+      step: "full_name",
+      data: {
+        flow_type: "tenant",
+        step: "full_name",
+        profile_name: profileName,
+        phone_number: phoneNumber,
+        mpesa_number: phoneNumber
+      }
+    });
+    console.log("Started session", session);
+
     return {
       reply: [
         "Beautiful choice ❤️",
@@ -377,12 +412,29 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, fo
       selectedOption: "1",
       selectedUserType: "tenant",
       flowName: "tenant_registration",
-      currentStep: "chat_tenant_full_name",
-      sessionData: {}
+      currentStep: "full_name",
+      sessionData: session.data,
+      skipSessionUpdate: true
     };
   }
 
   if (normalized === "4") {
+    const session = await service.startOnboardingFlow({
+      phoneNumber,
+      waId: phoneNumber,
+      flowType: "save_towards_rent",
+      selectedOption: "4",
+      step: "full_name",
+      data: {
+        flow_type: "save_towards_rent",
+        step: "full_name",
+        profile_name: profileName,
+        phone_number: phoneNumber,
+        mpesa_number: phoneNumber
+      }
+    });
+    console.log("Started session", session);
+
     return {
       reply: [
         "Beautiful choice ❤️",
@@ -399,8 +451,9 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, profileName, fo
       selectedOption: "4",
       selectedUserType: "save_towards_rent",
       flowName: "save_towards_rent",
-      currentStep: "chat_save_full_name",
-      sessionData: {}
+      currentStep: "full_name",
+      sessionData: session.data,
+      skipSessionUpdate: true
     };
   }
 
@@ -512,159 +565,144 @@ async function getActiveSessionForDecision(phoneNumber) {
   }
 }
 
-function advanceTenantChatSession(session, text) {
+async function continueFlow(session, message) {
   const data = session.data || {};
+  const flowType = data.flow_type || session.selected_user_type;
+  const step = data.step || session.current_step;
 
-  if (session.current_step === "chat_tenant_full_name") {
-    return {
-      reply: "Thank you. What phone number should we use for your PayRent account?",
-      selectedOption: "1",
-      selectedUserType: "tenant",
-      currentStep: "chat_tenant_phone_number",
-      sessionData: { ...data, full_name: text }
-    };
+  console.log("Current flow", flowType);
+  console.log("Current step", step);
+  console.log("Incoming answer", message);
+
+  if (flowType === "tenant") {
+    return continueTenantFlow(session, data, step, message);
   }
 
-  if (session.current_step === "chat_tenant_phone_number") {
-    return {
-      reply: "Got it. What is your email address? Reply - if you want to skip.",
-      selectedOption: "1",
-      selectedUserType: "tenant",
-      currentStep: "chat_tenant_email",
-      sessionData: { ...data, phone_number: text }
-    };
+  if (flowType === "save_towards_rent") {
+    return continueSaveTowardsRentFlow(session, data, step, message);
   }
 
-  if (session.current_step === "chat_tenant_email") {
-    return {
-      reply: "Do you have an invitation code? Reply YES or NO.",
-      selectedOption: "1",
-      selectedUserType: "tenant",
-      currentStep: "chat_tenant_has_invitation",
-      sessionData: { ...data, email: text === "-" ? "" : text }
-    };
-  }
-
-  if (session.current_step === "chat_tenant_has_invitation") {
-    const hasInvitation = ["yes", "y"].includes(text.toLowerCase());
-    return {
-      reply: hasInvitation ? "Please enter your invitation code." : "How much is your monthly rent? Example: 15000",
-      selectedOption: "1",
-      selectedUserType: "tenant",
-      currentStep: hasInvitation ? "chat_tenant_invitation_code" : "chat_tenant_monthly_rent",
-      sessionData: { ...data, has_invitation_code: hasInvitation ? "yes" : "no" }
-    };
-  }
-
-  if (session.current_step === "chat_tenant_invitation_code") {
-    return {
-      reply: "How much is your monthly rent? Example: 15000",
-      selectedOption: "1",
-      selectedUserType: "tenant",
-      currentStep: "chat_tenant_monthly_rent",
-      sessionData: { ...data, invitation_code: text }
-    };
-  }
-
-  if (session.current_step === "chat_tenant_monthly_rent") {
-    return {
-      reply: "What day of the month is rent due? Example: 5",
-      selectedOption: "1",
-      selectedUserType: "tenant",
-      currentStep: "chat_tenant_rent_due_day",
-      sessionData: { ...data, monthly_rent_amount: text }
-    };
-  }
-
-  if (session.current_step === "chat_tenant_rent_due_day") {
-    const payload = { ...data, rent_due_day: text, flow_name: "tenant_registration" };
-    return {
-      reply: "Thank you ❤️ We’re creating your PayRent tenant profile now.",
-      selectedOption: "1",
-      selectedUserType: "tenant",
-      currentStep: "completed",
-      sessionData: payload,
-      fallbackFlowName: "tenant_registration",
-      fallbackPayload: payload,
-      completeSession: true
-    };
-  }
-
-  return { reply: WELCOME_MENU };
+  console.log("Next step", "choose_user_type");
+  return { reply: WELCOME_MENU, skipSessionUpdate: true };
 }
 
-function advanceSaveChatSession(session, text) {
-  const data = session.data || {};
+async function continueTenantFlow(session, data, step, message) {
+  if (step === "full_name") {
+    const nextData = { ...data, full_name: message, step: "id_number" };
+    await service.advanceOnboardingFlow({ session, step: "id_number", data: nextData });
+    console.log("Next step", "id_number");
+    return { reply: "What is your ID number?", skipSessionUpdate: true };
+  }
 
-  if (session.current_step === "chat_save_full_name") {
+  if (step === "id_number") {
+    const nextData = { ...data, id_number: message, national_id_number: message, step: "invitation_code_question" };
+    await service.advanceOnboardingFlow({ session, step: "invitation_code_question", data: nextData });
+    console.log("Next step", "invitation_code_question");
+    return { reply: "Do you have an invitation code? Reply Yes or No.", skipSessionUpdate: true };
+  }
+
+  if (step === "invitation_code_question") {
+    const hasInvitation = ["yes", "y"].includes(message.toLowerCase());
+    const nextStep = hasInvitation ? "invitation_code" : "monthly_rent";
+    const nextData = {
+      ...data,
+      has_invitation_code: hasInvitation ? "yes" : "no",
+      step: nextStep
+    };
+    await service.advanceOnboardingFlow({ session, step: nextStep, data: nextData });
+    console.log("Next step", nextStep);
     return {
-      reply: "Thank you. What phone number should we use for your PayRent savings goal?",
-      selectedOption: "4",
-      selectedUserType: "save_towards_rent",
-      currentStep: "chat_save_phone_number",
-      sessionData: { ...data, full_name: text }
+      reply: hasInvitation ? "Please enter your invitation code." : "What is your monthly rent amount?"
     };
   }
 
-  if (session.current_step === "chat_save_phone_number") {
-    return {
-      reply: "How much is your monthly rent? Example: 15000",
-      selectedOption: "4",
-      selectedUserType: "save_towards_rent",
-      currentStep: "chat_save_monthly_rent",
-      sessionData: { ...data, phone_number: text }
-    };
+  if (step === "invitation_code") {
+    const nextData = { ...data, invitation_code: message, step: "monthly_rent" };
+    await service.advanceOnboardingFlow({ session, step: "monthly_rent", data: nextData });
+    console.log("Next step", "monthly_rent");
+    return { reply: "What is your monthly rent amount?", skipSessionUpdate: true };
   }
 
-  if (session.current_step === "chat_save_monthly_rent") {
-    return {
-      reply: "What day of the month is rent due? Example: 5",
-      selectedOption: "4",
-      selectedUserType: "save_towards_rent",
-      currentStep: "chat_save_rent_due_day",
-      sessionData: { ...data, monthly_rent_amount: text }
-    };
+  if (step === "monthly_rent") {
+    const nextData = { ...data, monthly_rent_amount: message, step: "due_day" };
+    await service.advanceOnboardingFlow({ session, step: "due_day", data: nextData });
+    console.log("Next step", "due_day");
+    return { reply: "What day of the month is rent due?", skipSessionUpdate: true };
   }
 
-  if (session.current_step === "chat_save_rent_due_day") {
-    return {
-      reply: "How often do you want to save? Reply Daily, Weekly, or Monthly.",
-      selectedOption: "4",
-      selectedUserType: "save_towards_rent",
-      currentStep: "chat_save_frequency",
-      sessionData: { ...data, rent_due_day: text }
-    };
-  }
-
-  if (session.current_step === "chat_save_frequency") {
-    return {
-      reply: "When do you want to start? Reply with YYYY-MM-DD, or - to skip.",
-      selectedOption: "4",
-      selectedUserType: "save_towards_rent",
-      currentStep: "chat_save_target_start_date",
-      sessionData: { ...data, savings_frequency: text.toLowerCase() }
-    };
-  }
-
-  if (session.current_step === "chat_save_target_start_date") {
+  if (step === "due_day") {
     const payload = {
       ...data,
-      target_start_date: text === "-" ? "" : text,
-      flow_name: "save_towards_rent"
+      rent_due_day: message,
+      phone_number: data.phone_number || session.phone_number,
+      full_name: data.full_name || data.profile_name || "WhatsApp User",
+      flow_name: "tenant_registration"
     };
+    await service.advanceOnboardingFlow({ session, step: "complete", data: { ...payload, step: "complete" }, status: "completed" });
+    console.log("Next step", "complete");
     return {
-      reply: "Beautiful ❤️ We’re creating your rent savings goal now.",
-      selectedOption: "4",
-      selectedUserType: "save_towards_rent",
-      currentStep: "completed",
-      sessionData: payload,
-      fallbackFlowName: "save_towards_rent",
+      reply: "Registration complete. Beautiful ❤️ We’re creating your PayRent tenant profile now.",
+      fallbackFlowName: "tenant_registration",
       fallbackPayload: payload,
-      completeSession: true
+      completeSession: true,
+      skipSessionUpdate: true
     };
   }
 
-  return { reply: WELCOME_MENU };
+  console.log("Next step", "unknown");
+  return { reply: "Please reply MENU to restart or CANCEL to stop.", skipSessionUpdate: true };
+}
+
+async function continueSaveTowardsRentFlow(session, data, step, message) {
+  if (step === "full_name") {
+    const nextData = { ...data, full_name: message, step: "id_number" };
+    await service.advanceOnboardingFlow({ session, step: "id_number", data: nextData });
+    console.log("Next step", "id_number");
+    return { reply: "What is your ID number?", skipSessionUpdate: true };
+  }
+
+  if (step === "id_number") {
+    const nextData = { ...data, id_number: message, national_id_number: message, step: "monthly_rent" };
+    await service.advanceOnboardingFlow({ session, step: "monthly_rent", data: nextData });
+    console.log("Next step", "monthly_rent");
+    return { reply: "What is your monthly rent amount?", skipSessionUpdate: true };
+  }
+
+  if (step === "monthly_rent") {
+    const nextData = { ...data, monthly_rent_amount: message, step: "due_day" };
+    await service.advanceOnboardingFlow({ session, step: "due_day", data: nextData });
+    console.log("Next step", "due_day");
+    return { reply: "What day of the month is rent due?", skipSessionUpdate: true };
+  }
+
+  if (step === "due_day") {
+    const nextData = { ...data, rent_due_day: message, step: "savings_frequency" };
+    await service.advanceOnboardingFlow({ session, step: "savings_frequency", data: nextData });
+    console.log("Next step", "savings_frequency");
+    return { reply: "How often do you want to save? Reply Daily, Weekly, or Monthly.", skipSessionUpdate: true };
+  }
+
+  if (step === "savings_frequency") {
+    const payload = {
+      ...data,
+      savings_frequency: message.toLowerCase(),
+      phone_number: data.phone_number || session.phone_number,
+      full_name: data.full_name || data.profile_name || "WhatsApp User",
+      flow_name: "save_towards_rent"
+    };
+    await service.advanceOnboardingFlow({ session, step: "complete", data: { ...payload, step: "complete" }, status: "completed" });
+    console.log("Next step", "complete");
+    return {
+      reply: "Registration complete. Beautiful ❤️ We’re creating your rent savings goal now.",
+      fallbackFlowName: "save_towards_rent",
+      fallbackPayload: payload,
+      completeSession: true,
+      skipSessionUpdate: true
+    };
+  }
+
+  console.log("Next step", "unknown");
+  return { reply: "Please reply MENU to restart or CANCEL to stop.", skipSessionUpdate: true };
 }
 
 function handleWhatsAppWebhookInBackground({ phoneNumber, waId, profileName, incomingMessage, outgoingMessage, decision }) {
@@ -683,23 +721,28 @@ function handleWhatsAppWebhookInBackground({ phoneNumber, waId, profileName, inc
         body: outgoingMessage,
         channel: "whatsapp"
       });
-      await service.createOrUpdateMenuSession({
-        phoneNumber,
-        waId,
-        selectedOption: decision.selectedOption,
-        selectedUserType: decision.selectedUserType,
-        currentStep: decision.currentStep || (decision.flowName ? "flow_launch_requested" : "choose_user_type")
-      });
-      const activeSession = await service.getActiveOnboardingSession(phoneNumber);
-      if (activeSession && decision.sessionData) {
-        await service.updateOnboardingSession({
-          id: activeSession.id,
-          currentStep: decision.currentStep || activeSession.current_step,
-          data: decision.sessionData,
+      let activeSession = null;
+      if (!decision.skipSessionUpdate) {
+        await service.createOrUpdateMenuSession({
+          phoneNumber,
+          waId,
           selectedOption: decision.selectedOption,
           selectedUserType: decision.selectedUserType,
-          status: decision.completeSession ? "completed" : "active"
+          currentStep: decision.currentStep || (decision.flowName ? "flow_launch_requested" : "choose_user_type")
         });
+        activeSession = await service.getActiveOnboardingSession(phoneNumber);
+        if (activeSession && decision.sessionData) {
+          await service.updateOnboardingSession({
+            id: activeSession.id,
+            currentStep: decision.currentStep || activeSession.current_step,
+            data: decision.sessionData,
+            selectedOption: decision.selectedOption,
+            selectedUserType: decision.selectedUserType,
+            status: decision.completeSession ? "completed" : "active"
+          });
+        }
+      } else {
+        activeSession = await service.getActiveOnboardingSession(phoneNumber);
       }
 
       if (decision.fallbackFlowName && decision.fallbackPayload) {
@@ -782,14 +825,16 @@ async function launchWhatsAppFlowInBackground({ to, flowName, profileName, phone
       channel: "whatsapp"
     });
     if (sessionId) {
+      const session = await service.getActiveOnboardingSession(phoneNumber);
       await service.updateOnboardingSession({
         id: sessionId,
-        currentStep: flowName === "tenant_registration" ? "chat_tenant_full_name" : "chat_save_full_name",
+        currentStep: session?.current_step || "full_name",
         data: {
-          flow_name: flowName
+          ...(session?.data || {}),
+          native_flow_name: flowName
         },
         selectedOption: flowName === "tenant_registration" ? "1" : "4",
-        selectedUserType: flowName,
+        selectedUserType: flowName === "tenant_registration" ? "tenant" : "save_towards_rent",
         nativeFlowAttempted: true,
         nativeFlowContentSid: contentSid,
         fallbackChatActive: true
