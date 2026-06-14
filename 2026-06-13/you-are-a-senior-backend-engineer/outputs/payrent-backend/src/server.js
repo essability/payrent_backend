@@ -1010,11 +1010,16 @@ async function continueTenantFlow(session, data, step, message) {
       flow_name: "tenant_registration"
     };
     try {
-      await flowProcessor.process({
-        flowName: "tenant_registration",
-        source: "whatsapp_chat_fallback",
+      await service.createTenantFromFlow({
+        fullName: payload.full_name,
         phoneNumber: payload.phone_number,
-        payload
+        email: payload.email || null,
+        nationalIdNumber: payload.national_id_number || payload.id_number || null,
+        hasInvitationCode: payload.has_invitation_code,
+        invitationCode: payload.invitation_code || null,
+        monthlyRentAmount: parseMoneyAmount(payload.monthly_rent_amount),
+        rentDueDay: Number.parseInt(payload.rent_due_day, 10),
+        signupChannel: "whatsapp"
       });
     } catch (error) {
       console.error("Tenant Completion Save Error:", error);
@@ -1427,6 +1432,12 @@ function parseMoneyAmount(value) {
   return Number.isFinite(amount) && amount > 0 ? amount : null;
 }
 
+function normalizeSavingsFrequency(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["daily", "weekly", "monthly"].includes(normalized)) return normalized;
+  return null;
+}
+
 function formatKes(value) {
   return Number(value || 0).toLocaleString("en-KE", {
     maximumFractionDigits: 0
@@ -1463,19 +1474,31 @@ async function continueSaveTowardsRentFlow(session, data, step, message) {
   }
 
   if (step === "savings_frequency") {
+    const savingsFrequency = normalizeSavingsFrequency(message);
+    if (!savingsFrequency) {
+      return {
+        reply: "Please reply Daily, Weekly, or Monthly to finish your rent savings goal. You can also reply MENU to restart.",
+        skipSessionUpdate: true
+      };
+    }
+
     const payload = {
       ...data,
-      savings_frequency: message.toLowerCase(),
+      savings_frequency: savingsFrequency,
       phone_number: data.phone_number || session.phone_number,
       full_name: data.full_name || data.profile_name || "WhatsApp User",
       flow_name: "save_towards_rent"
     };
     try {
-      await flowProcessor.process({
-        flowName: "save_towards_rent",
-        source: "whatsapp_chat_fallback",
+      await service.createSaveTowardsRentGoal({
+        fullName: payload.full_name,
         phoneNumber: payload.phone_number,
-        payload
+        nationalIdNumber: payload.national_id_number || payload.id_number || null,
+        monthlyRentAmount: parseMoneyAmount(payload.monthly_rent_amount),
+        rentDueDay: Number.parseInt(payload.rent_due_day, 10),
+        savingsFrequency: payload.savings_frequency,
+        targetStartDate: payload.target_start_date || null,
+        signupChannel: "whatsapp"
       });
     } catch (error) {
       console.error("Save Towards Rent Completion Error:", error);

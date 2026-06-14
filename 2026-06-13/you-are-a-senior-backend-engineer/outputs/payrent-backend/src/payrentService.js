@@ -191,14 +191,19 @@ export class PayRentService {
       }
     });
 
-    const savingsPreference = await this.db.insert("savings_preferences", {
-      user_id: user.id,
-      rent_goal_id: rentGoal.id,
-      frequency: savingsFrequency,
-      target_start_date: targetStartDate || null,
-      channel: "whatsapp",
-      is_active: true
-    });
+    let savingsPreference = null;
+    try {
+      savingsPreference = await this.db.insert("savings_preferences", {
+        user_id: user.id,
+        rent_goal_id: rentGoal.id,
+        frequency: savingsFrequency,
+        target_start_date: targetStartDate || null,
+        channel: "whatsapp",
+        is_active: true
+      });
+    } catch (error) {
+      console.error("Savings preference insert failed; rent goal was still created:", error);
+    }
 
     return { user, rentGoal, savingsPreference };
   }
@@ -207,7 +212,7 @@ export class PayRentService {
     const targetMonth = new Date();
     targetMonth.setUTCDate(1);
 
-    return this.db.insert("rent_goals", {
+    const fullPayload = {
       tenant_user_id: userId,
       monthly_rent_amount: monthlyRentAmount,
       rent_due_day: rentDueDay,
@@ -216,7 +221,20 @@ export class PayRentService {
       savings_frequency: savingsFrequency || null,
       target_start_date: targetStartDate || null,
       metadata
-    });
+    };
+
+    try {
+      return await this.db.insert("rent_goals", fullPayload);
+    } catch (error) {
+      console.error("Full rent goal insert failed; retrying with core columns only:", error);
+      return this.db.insert("rent_goals", {
+        tenant_user_id: userId,
+        monthly_rent_amount: monthlyRentAmount,
+        rent_due_day: rentDueDay,
+        target_month: targetMonth.toISOString().slice(0, 10),
+        amount_saved: 0
+      });
+    }
   }
 
   async createLandlord({ fullName, phoneNumber, email, nationalIdNumber, landlordType, companyName, signupChannel = "web" }) {
