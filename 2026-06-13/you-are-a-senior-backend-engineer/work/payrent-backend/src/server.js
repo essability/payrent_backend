@@ -60,7 +60,12 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
 
     if (req.method === "GET" && url.pathname === "/health") {
-      sendJson(res, 200, { ok: true, service: "payrent-backend" });
+      sendJson(res, 200, {
+        ok: true,
+        service: "payrent-backend",
+        aiConfigured: Boolean(config.openaiApiKey),
+        openaiModel: config.openaiModel
+      });
       return;
     }
 
@@ -612,15 +617,6 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, waId, externalU
   if (looksLikePaymentRequest(normalized)) {
     return {
       reply: "Rent payment through M-PESA is coming soon ❤️ For now, PayRent can help you register, save towards rent, track your goal, and receive reminders. Reply 1 for Tenant or 4 to Save Towards Rent.",
-      selectedOption: null,
-      selectedUserType: null,
-      skipSessionUpdate: true
-    };
-  }
-
-  if (!knownUser) {
-    return {
-      reply: WELCOME_MENU,
       selectedOption: null,
       selectedUserType: null,
       skipSessionUpdate: true

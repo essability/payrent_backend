@@ -30,15 +30,31 @@ export class PayRentService {
   }
 
   async upsertUser({ fullName, phoneNumber, email, nationalIdNumber, signupChannel }) {
-    return this.db.insert("users", {
+    const payload = {
       full_name: fullName,
       phone_number: phoneNumber,
       national_id_number: nationalIdNumber || null,
-      signup_channel: signupChannel
-    }, {
-      onConflict: "phone_number",
-      mergeDuplicates: true
-    });
+      signup_channel: normalizeSignupChannel(signupChannel)
+    };
+
+    try {
+      return await this.db.insert("users", payload, {
+        onConflict: "phone_number",
+        mergeDuplicates: true
+      });
+    } catch (error) {
+      if (String(error?.message || "").includes("signup_channel")) {
+        console.error("Signup channel insert failed; retrying with whatsapp:", error);
+        return this.db.insert("users", {
+          ...payload,
+          signup_channel: "whatsapp"
+        }, {
+          onConflict: "phone_number",
+          mergeDuplicates: true
+        });
+      }
+      throw error;
+    }
   }
 
   async assignRole(userId, roleName) {
@@ -1062,4 +1078,11 @@ function generateInvitationCode(unitNumber) {
   const suffix = crypto.randomBytes(3).toString("hex").toUpperCase();
   const unit = String(unitNumber || "UNIT").replace(/[^a-z0-9]/gi, "").toUpperCase().slice(0, 6);
   return `JOIN-${unit}-${suffix}`;
+}
+
+function normalizeSignupChannel(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "web_form") return "web";
+  if (["whatsapp", "web", "dashboard", "internal"].includes(normalized)) return normalized;
+  return "whatsapp";
 }

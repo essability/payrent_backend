@@ -8,7 +8,11 @@ const SYSTEM_PROMPT = [
   "Keep replies short enough for WhatsApp."
 ].join(" ");
 
-export const AI_FALLBACK_REPLY = "Thank you for messaging PayRent ❤️ Please reply 1 for Tenant, 2 for Landlord, 3 for Property Manager, or 4 to Save Towards Rent.";
+export const AI_FALLBACK_REPLY = [
+  "PayRent Kenya helps tenants save towards rent, track rent goals, receive reminders, and manage rent from WhatsApp.",
+  "",
+  "Reply MENU to register or choose Tenant, Landlord, Property Manager, or Save Towards Rent."
+].join("\n");
 
 export async function generatePayRentReply({ userMessage, userProfile, recentMessages, apiKey, model }) {
   if (!apiKey) {
