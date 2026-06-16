@@ -1394,6 +1394,11 @@ function parseMoneyAmount(value) {
   return Number.isFinite(amount) && amount > 0 ? amount : null;
 }
 
+function parseDueDay(value) {
+  const day = Number.parseInt(String(value || "").replace(/[^\d]/g, ""), 10);
+  return Number.isInteger(day) && day >= 1 && day <= 31 ? day : null;
+}
+
 function normalizeSavingsFrequency(value) {
   const normalized = String(value || "").trim().toLowerCase();
   if (["daily", "weekly", "monthly"].includes(normalized)) return normalized;
@@ -1701,21 +1706,44 @@ async function handleFormSubmission({ req, res, flowName }) {
       });
     }
 
-    sendText(res, 200, renderSuccessPage(confirmation), "text/html; charset=utf-8");
+    sendText(res, 200, renderSuccessPage({
+      message: confirmation,
+      whatsappText: "I have registered on PayRent"
+    }), "text/html; charset=utf-8");
     console.log(`${flowName} web form processed for:`, phoneNumber);
   } catch (error) {
     console.error("Web Form Error:", error);
     sendText(
       res,
       200,
-      renderSuccessPage("We received your form, but could not complete setup yet. Please return to WhatsApp and send Hi so we can help you continue."),
+      renderSuccessPage({
+        title: "Almost there",
+        message: [
+          "We could not complete setup from this form yet.",
+          "",
+          `Reason: ${error.message || "Something went wrong while saving your details."}`,
+          "",
+          "Please check that your phone number, rent amount, and rent due day are filled correctly.",
+          "",
+          "Then try again, or return to WhatsApp and send: I need help registering."
+        ].join("\n"),
+        whatsappText: "I need help registering on PayRent"
+      }),
       "text/html; charset=utf-8"
     );
   }
 }
 
 async function processWebRegistration({ flowName, payload, phoneNumber }) {
+  assertRequired(payload.full_name, "Full name");
+  assertRequired(phoneNumber, "Phone number");
+
   if (flowName === "tenant_registration") {
+    const monthlyRentAmount = parseMoneyAmount(payload.monthly_rent_amount);
+    const rentDueDay = parseDueDay(payload.rent_due_day);
+    if (!monthlyRentAmount) throw new Error("Monthly rent amount is required.");
+    if (!rentDueDay) throw new Error("Rent due day must be between 1 and 31.");
+
     return service.createTenantFromFlow({
       fullName: payload.full_name,
       phoneNumber,
@@ -1723,19 +1751,24 @@ async function processWebRegistration({ flowName, payload, phoneNumber }) {
       nationalIdNumber: payload.national_id_number || payload.id_number || null,
       hasInvitationCode: payload.has_invitation_code,
       invitationCode: payload.invitation_code || null,
-      monthlyRentAmount: parseMoneyAmount(payload.monthly_rent_amount),
-      rentDueDay: Number.parseInt(payload.rent_due_day, 10),
+      monthlyRentAmount,
+      rentDueDay,
       signupChannel: "web_form"
     });
   }
 
   if (flowName === "save_towards_rent") {
+    const monthlyRentAmount = parseMoneyAmount(payload.monthly_rent_amount);
+    const rentDueDay = parseDueDay(payload.rent_due_day);
+    if (!monthlyRentAmount) throw new Error("Monthly rent amount is required.");
+    if (!rentDueDay) throw new Error("Rent due day must be between 1 and 31.");
+
     return service.createSaveTowardsRentGoal({
       fullName: payload.full_name,
       phoneNumber,
       nationalIdNumber: payload.national_id_number || payload.id_number || null,
-      monthlyRentAmount: parseMoneyAmount(payload.monthly_rent_amount),
-      rentDueDay: Number.parseInt(payload.rent_due_day, 10),
+      monthlyRentAmount,
+      rentDueDay,
       savingsFrequency: normalizeSavingsFrequency(payload.savings_frequency) || "monthly",
       targetStartDate: payload.target_start_date || null,
       signupChannel: "web_form"
@@ -1759,6 +1792,12 @@ async function processWebRegistration({ flowName, payload, phoneNumber }) {
   }
 
   throw new Error(`Unsupported web registration flow: ${flowName}`);
+}
+
+function assertRequired(value, label) {
+  if (!String(value || "").trim()) {
+    throw new Error(`${label} is required.`);
+  }
 }
 
 function webFormConfirmationMessage(flowName, payload) {
@@ -1820,14 +1859,14 @@ function renderTenantRegistrationForm({ phoneNumber, waId }) {
       inputField("Full Name", "full_name", "text", "", true),
       inputField("Phone Number", "phone_number", "tel", phoneNumber, true),
       inputField("Kenya ID Number", "national_id_number", "text", "", true),
-      inputField("Email", "email", "email", "", false),
+      inputField("Email", "email", "text", "", false),
       selectField("Do you have an invitation code?", "has_invitation_code", [
         ["no", "No"],
         ["yes", "Yes"]
       ]),
       inputField("Invitation Code", "invitation_code", "text", "", false),
-      inputField("Monthly Rent Amount", "monthly_rent_amount", "number", "", true),
-      inputField("Rent Due Day", "rent_due_day", "number", "", true)
+      inputField("Monthly Rent Amount", "monthly_rent_amount", "text", "", true),
+      inputField("Rent Due Day", "rent_due_day", "text", "", true)
     ],
     submitLabel: "Create tenant profile"
   });
@@ -1843,8 +1882,8 @@ function renderSaveTowardsRentForm({ phoneNumber, waId }) {
       inputField("Full Name", "full_name", "text", "", true),
       inputField("Phone Number", "phone_number", "tel", phoneNumber, true),
       inputField("Kenya ID Number", "national_id_number", "text", "", true),
-      inputField("Monthly Rent Amount", "monthly_rent_amount", "number", "", true),
-      inputField("Rent Due Day", "rent_due_day", "number", "", true),
+      inputField("Monthly Rent Amount", "monthly_rent_amount", "text", "", true),
+      inputField("Rent Due Day", "rent_due_day", "text", "", true),
       selectField("Savings Frequency", "savings_frequency", [
         ["daily", "Daily"],
         ["weekly", "Weekly"],
@@ -1865,7 +1904,7 @@ function renderLandlordRegistrationForm({ phoneNumber, waId }) {
     fields: [
       inputField("Full Name", "full_name", "text", "", true),
       inputField("Phone Number", "phone_number", "tel", phoneNumber, true),
-      inputField("Email", "email", "email", "", false),
+      inputField("Email", "email", "text", "", false),
       inputField("Kenya ID Number", "national_id_number", "text", "", true),
       selectField("Landlord Type", "landlord_type", [
         ["individual_landlord", "Individual Landlord"],
@@ -1875,7 +1914,7 @@ function renderLandlordRegistrationForm({ phoneNumber, waId }) {
       inputField("Company Name", "company_name", "text", "", false),
       inputField("Property Name", "property_name", "text", "", true),
       inputField("County", "county", "text", "", true),
-      inputField("Number of Units", "units_count", "number", "", false),
+      inputField("Number of Units", "units_count", "text", "", false),
       selectField("Current Rent Collection Method", "payment_method", [
         ["mpesa", "M-PESA"],
         ["bank", "Bank"],
@@ -1895,10 +1934,10 @@ function renderPropertyManagerRegistrationForm({ phoneNumber, waId }) {
     fields: [
       inputField("Full Name", "full_name", "text", "", true),
       inputField("Phone Number", "phone_number", "tel", phoneNumber, true),
-      inputField("Email", "email", "email", "", false),
+      inputField("Email", "email", "text", "", false),
       inputField("Kenya ID Number", "national_id_number", "text", "", true),
       inputField("Company Name", "company_name", "text", "", true),
-      inputField("Number of Properties Managed", "properties_count", "number", "", false),
+      inputField("Number of Properties Managed", "properties_count", "text", "", false),
       inputField("Main County", "county", "text", "", true)
     ],
     submitLabel: "Create property manager profile"
@@ -1991,7 +2030,8 @@ function renderFormPage({ title, intro, action, hidden, fields, submitLabel }) {
 </html>`;
 }
 
-function renderSuccessPage(message) {
+function renderSuccessPage({ title = "Done ❤️", message, whatsappText = "I have registered on PayRent" }) {
+  const whatsappUrl = buildReturnToWhatsAppUrl(whatsappText);
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -2012,15 +2052,41 @@ function renderSuccessPage(message) {
     }
     h1 { margin: 0 0 12px; font-size: 28px; }
     p { white-space: pre-line; line-height: 1.5; color: #3c4043; }
+    a.button {
+      display: block;
+      margin-top: 22px;
+      border-radius: 8px;
+      padding: 14px 16px;
+      background: #0f7b62;
+      color: white;
+      font-weight: 800;
+      text-align: center;
+      text-decoration: none;
+    }
+    .hint {
+      margin-top: 12px;
+      font-size: 13px;
+      color: #5f6368;
+    }
   </style>
 </head>
 <body>
   <main>
-    <h1>Done ❤️</h1>
+    <h1>${escapeHtml(title)}</h1>
     <p>${escapeHtml(message)}</p>
+    <a class="button" href="${escapeHtml(whatsappUrl)}">Return to WhatsApp</a>
+    <p class="hint">Tap the button to return to PayRent on WhatsApp and continue.</p>
   </main>
 </body>
 </html>`;
+}
+
+function buildReturnToWhatsAppUrl(text) {
+  const configuredNumber = normalizeWhatsAppPhone(config.twilioWhatsAppFrom || "");
+  const digits = configuredNumber.replace(/[^\d]/g, "");
+  const encodedText = encodeURIComponent(text);
+  if (!digits) return `https://wa.me/?text=${encodedText}`;
+  return `https://wa.me/${digits}?text=${encodedText}`;
 }
 
 function inputField(label, name, type, value, required) {
