@@ -1747,7 +1747,7 @@ async function processWebRegistration({ flowName, payload, phoneNumber }) {
     return service.createTenantFromFlow({
       fullName: payload.full_name,
       phoneNumber,
-      email: payload.email || null,
+      email: null,
       nationalIdNumber: payload.national_id_number || payload.id_number || null,
       hasInvitationCode: payload.has_invitation_code,
       invitationCode: payload.invitation_code || null,
@@ -1778,6 +1778,7 @@ async function processWebRegistration({ flowName, payload, phoneNumber }) {
   if (flowName === "landlord_registration") {
     return service.createLandlordFromChat({
       ...payload,
+      email: null,
       phone_number: phoneNumber,
       national_id_number: payload.national_id_number || payload.id_number || null
     });
@@ -1786,6 +1787,7 @@ async function processWebRegistration({ flowName, payload, phoneNumber }) {
   if (flowName === "property_manager_registration") {
     return service.createPropertyManagerFromChat({
       ...payload,
+      email: null,
       phone_number: phoneNumber,
       national_id_number: payload.national_id_number || payload.id_number || null
     });
@@ -1859,7 +1861,6 @@ function renderTenantRegistrationForm({ phoneNumber, waId }) {
       inputField("Full Name", "full_name", "text", "", true),
       inputField("Phone Number", "phone_number", "tel", phoneNumber, true),
       inputField("Kenya ID Number", "national_id_number", "text", "", true),
-      inputField("Email", "email", "text", "", false),
       selectField("Do you have an invitation code?", "has_invitation_code", [
         ["no", "No"],
         ["yes", "Yes"]
@@ -1904,7 +1905,6 @@ function renderLandlordRegistrationForm({ phoneNumber, waId }) {
     fields: [
       inputField("Full Name", "full_name", "text", "", true),
       inputField("Phone Number", "phone_number", "tel", phoneNumber, true),
-      inputField("Email", "email", "text", "", false),
       inputField("Kenya ID Number", "national_id_number", "text", "", true),
       selectField("Landlord Type", "landlord_type", [
         ["individual_landlord", "Individual Landlord"],
@@ -1934,7 +1934,6 @@ function renderPropertyManagerRegistrationForm({ phoneNumber, waId }) {
     fields: [
       inputField("Full Name", "full_name", "text", "", true),
       inputField("Phone Number", "phone_number", "tel", phoneNumber, true),
-      inputField("Email", "email", "text", "", false),
       inputField("Kenya ID Number", "national_id_number", "text", "", true),
       inputField("Company Name", "company_name", "text", "", true),
       inputField("Number of Properties Managed", "properties_count", "text", "", false),
@@ -2031,7 +2030,9 @@ function renderFormPage({ title, intro, action, hidden, fields, submitLabel }) {
 }
 
 function renderSuccessPage({ title = "Done ❤️", message, whatsappText = "I have registered on PayRent" }) {
-  const whatsappUrl = buildReturnToWhatsAppUrl(whatsappText);
+  const whatsappUrl = buildReturnToWhatsAppUrl({
+    text: whatsappText
+  });
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -2081,9 +2082,8 @@ function renderSuccessPage({ title = "Done ❤️", message, whatsappText = "I h
 </html>`;
 }
 
-function buildReturnToWhatsAppUrl(text) {
-  const configuredNumber = normalizeWhatsAppPhone(config.twilioWhatsAppFrom || "");
-  const digits = configuredNumber.replace(/[^\d]/g, "");
+function buildReturnToWhatsAppUrl({ text }) {
+  const digits = normalizeWhatsAppPhone(config.twilioWhatsAppFrom || "").replace(/[^\d]/g, "");
   const encodedText = encodeURIComponent(text);
   if (!digits) return `https://wa.me/?text=${encodedText}`;
   return `https://wa.me/${digits}?text=${encodedText}`;

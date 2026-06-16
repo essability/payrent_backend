@@ -33,9 +33,7 @@ export class PayRentService {
     return this.db.insert("users", {
       full_name: fullName,
       phone_number: phoneNumber,
-      email: email || null,
       national_id_number: nationalIdNumber || null,
-      mpesa_number: phoneNumber,
       signup_channel: signupChannel
     }, {
       onConflict: "phone_number",
