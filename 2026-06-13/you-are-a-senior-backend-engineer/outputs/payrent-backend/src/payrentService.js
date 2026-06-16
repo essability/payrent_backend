@@ -404,14 +404,7 @@ export class PayRentService {
     monthlyRentAmount,
     rentDueDay
   }) {
-    const owner = await this.db.select("users", {
-      query: `?phone_number=${eq(ownerPhoneNumber)}&select=id,phone_number`,
-      single: true
-    });
-
-    if (!owner) {
-      throw new Error("Owner phone number was not found. Register the landlord or property manager first.");
-    }
+    const owner = await this.findUserByPhone(ownerPhoneNumber);
 
     const roles = await this.db.select("user_roles", {
       query: `?user_id=${eq(owner.id)}&select=roles(name)`
@@ -438,6 +431,39 @@ export class PayRentService {
     });
 
     return { property, unit };
+  }
+
+  async getOwnerPortfolioSummary(ownerPhoneNumber) {
+    const owner = await this.findUserByPhone(ownerPhoneNumber);
+    const roles = await this.db.select("user_roles", {
+      query: `?user_id=${eq(owner.id)}&select=roles(name)`
+    });
+    const roleNames = roles.map((row) => row.roles?.name).filter(Boolean);
+    const propertyRows = [];
+
+    if (roleNames.includes("landlord")) {
+      const landlordProperties = await this.db.select("properties", {
+        query: `?landlord_user_id=${eq(owner.id)}&select=id,name,county,city,created_at&order=created_at.desc`
+      });
+      propertyRows.push(...landlordProperties);
+    }
+
+    if (roleNames.includes("property_manager")) {
+      const managerProperties = await this.db.select("properties", {
+        query: `?property_manager_user_id=${eq(owner.id)}&select=id,name,county,city,created_at&order=created_at.desc`
+      });
+      propertyRows.push(...managerProperties);
+    }
+
+    const properties = [...new Map(propertyRows.map((property) => [property.id, property])).values()];
+    let units = [];
+    if (properties.length > 0) {
+      units = await this.db.select("units", {
+        query: `?property_id=in.(${properties.map((property) => property.id).join(",")})&select=id,property_id,unit_number,monthly_rent_amount,rent_due_day`
+      });
+    }
+
+    return { owner, roles: roleNames, properties, units };
   }
 
   async createUnit({ ownerPhoneNumber, propertyId, unitNumber, monthlyRentAmount, rentDueDay }) {
@@ -905,6 +931,7 @@ export class PayRentService {
     const existing = await this.getActiveOnboardingSession(sessionExternalUserId);
     const sessionData = {
       ...data,
+      selected_option: selectedOption || data.selected_option || null,
       flow_type: flowType,
       step
     };

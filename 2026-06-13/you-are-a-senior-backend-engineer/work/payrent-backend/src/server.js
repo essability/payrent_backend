@@ -55,6 +55,18 @@ const TENANT_HOME_MENU = [
   "Reply with 1, 2, 3, 4, 5, or 6."
 ].join("\n");
 
+const OWNER_HOME_MENU = [
+  "What would you like to do next?",
+  "",
+  "1. Create property",
+  "2. Invite tenant",
+  "3. View property summary",
+  "4. Ask PayRent AI",
+  "5. Talk to support",
+  "",
+  "Reply with 1, 2, 3, 4, or 5."
+].join("\n");
+
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`);
@@ -493,7 +505,7 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, waId, externalU
     const registeredUser = await getRegisteredUserForDecision(phoneNumber);
     if (registeredUser) {
       return {
-        reply: buildTenantHomeMenu(registeredUser.full_name),
+        reply: buildRegisteredHomeMenu(registeredUser),
         selectedOption: null,
         selectedUserType: null,
         skipSessionUpdate: true
@@ -511,7 +523,7 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, waId, externalU
   if (normalized === "home") {
     const knownUser = await getRegisteredUserForDecision(phoneNumber);
     return {
-      reply: knownUser ? buildTenantHomeMenu(knownUser.full_name) : WELCOME_MENU,
+      reply: knownUser ? buildRegisteredHomeMenu(knownUser) : WELCOME_MENU,
       selectedOption: null,
       selectedUserType: null,
       skipSessionUpdate: true
@@ -526,7 +538,7 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, waId, externalU
 
   if (isWelcomeTrigger(normalized)) {
     return {
-      reply: knownUser ? buildTenantHomeMenu(knownUser.full_name) : WELCOME_MENU,
+      reply: knownUser ? buildRegisteredHomeMenu(knownUser) : WELCOME_MENU,
       selectedOption: null,
       selectedUserType: null,
       skipSessionUpdate: true
@@ -557,7 +569,7 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, waId, externalU
         reply: [
           `You are already registered on PayRent${knownUser.full_name && knownUser.full_name !== "Unknown" ? `, ${knownUser.full_name}` : ""} ❤️`,
           "",
-          TENANT_HOME_MENU
+          homeMenuForUser(knownUser)
         ].join("\n"),
         selectedOption: "registered_home",
         selectedUserType: "tenant",
@@ -565,7 +577,7 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, waId, externalU
       };
     }
 
-    const tenantHomeDecision = await handleTenantHomeAction({
+    const registeredHomeDecision = await handleRegisteredHomeAction({
       normalized,
       text,
       phoneNumber,
@@ -574,7 +586,7 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, waId, externalU
       profileName,
       knownUser
     });
-    if (tenantHomeDecision) return tenantHomeDecision;
+    if (registeredHomeDecision) return registeredHomeDecision;
   }
 
   if (normalized === "1") {
@@ -687,13 +699,32 @@ async function getRegisteredUserForDecision(phoneNumber) {
   }
 }
 
-async function getRegisteredUserRecord(phoneNumber) {
-  try {
-    return await service.findUserByPhone(phoneNumber, { required: false });
-  } catch (error) {
-    console.error("Registered User Record Lookup Error:", error);
-    return null;
+async function handleRegisteredHomeAction({ normalized, text, phoneNumber, waId, externalUserId, profileName, knownUser }) {
+  if (isOwnerUser(knownUser)) {
+    const ownerDecision = await handleOwnerHomeAction({
+      normalized,
+      text,
+      phoneNumber,
+      waId,
+      externalUserId,
+      profileName,
+      knownUser
+    });
+    if (ownerDecision) return ownerDecision;
   }
+
+  if (isTenantUser(knownUser)) {
+    return handleTenantHomeAction({
+      normalized,
+      phoneNumber,
+      waId,
+      externalUserId,
+      profileName,
+      knownUser
+    });
+  }
+
+  return null;
 }
 
 async function handleTenantHomeAction({ normalized, phoneNumber, waId, externalUserId, profileName, knownUser }) {
@@ -840,13 +871,161 @@ async function handleTenantHomeAction({ normalized, phoneNumber, waId, externalU
   return null;
 }
 
-function buildTenantHomeMenu(fullName) {
-  const name = String(fullName || "").trim();
+async function handleOwnerHomeAction({ normalized, phoneNumber, waId, externalUserId, profileName, knownUser }) {
+  if (normalized === "1" || normalized === "property" || normalized === "create property") {
+    const session = await service.startOnboardingFlow({
+      phoneNumber,
+      waId,
+      externalUserId,
+      flowType: "property_creation",
+      selectedOption: "owner_create_property",
+      step: "property_name",
+      data: {
+        flow_type: "property_creation",
+        step: "property_name",
+        profile_name: profileName,
+        phone_number: phoneNumber
+      }
+    });
+    console.log("Started session", session);
+    return {
+      reply: "What is the property name?",
+      selectedOption: "owner_create_property",
+      selectedUserType: "owner",
+      sessionId: session.id,
+      skipSessionUpdate: true
+    };
+  }
+
+  if (normalized === "2" || normalized === "invite" || normalized === "invite tenant") {
+    const session = await service.startOnboardingFlow({
+      phoneNumber,
+      waId,
+      externalUserId,
+      flowType: "tenant_invitation",
+      selectedOption: "owner_invite_tenant",
+      step: "property_id",
+      data: {
+        flow_type: "tenant_invitation",
+        step: "property_id",
+        profile_name: profileName,
+        phone_number: phoneNumber
+      }
+    });
+    console.log("Started session", session);
+    return {
+      reply: "Please enter the Property ID for the tenant invitation. Reply 3 first if you need to view your property summary.",
+      selectedOption: "owner_invite_tenant",
+      selectedUserType: "owner",
+      sessionId: session.id,
+      skipSessionUpdate: true
+    };
+  }
+
+  if (normalized === "3" || normalized === "summary" || normalized === "properties") {
+    try {
+      const summary = await service.getOwnerPortfolioSummary(phoneNumber);
+      return {
+        reply: buildOwnerPortfolioSummary(summary, knownUser.full_name),
+        selectedOption: "owner_summary",
+        selectedUserType: "owner",
+        skipSessionUpdate: true
+      };
+    } catch (error) {
+      console.error("Owner Summary Error:", error);
+      return {
+        reply: `I could not load your property summary right now.\n\n${OWNER_HOME_MENU}`,
+        selectedOption: "owner_summary",
+        selectedUserType: "owner",
+        skipSessionUpdate: true
+      };
+    }
+  }
+
+  if (normalized === "4" || normalized === "ai" || normalized === "ask ai") {
+    const session = await service.startOnboardingFlow({
+      phoneNumber,
+      waId,
+      externalUserId,
+      flowType: "ai_question",
+      selectedOption: "owner_ai",
+      step: "question",
+      data: {
+        flow_type: "ai_question",
+        step: "question",
+        profile_name: profileName,
+        phone_number: phoneNumber
+      }
+    });
+    console.log("Started session", session);
+    return {
+      reply: "Ask me anything about PayRent, properties, rent collection, tenants, or reports.",
+      selectedOption: "owner_ai",
+      selectedUserType: "owner",
+      sessionId: session.id,
+      skipSessionUpdate: true
+    };
+  }
+
+  if (normalized === "5" || normalized === "support" || normalized === "help me") {
+    const session = await service.startOnboardingFlow({
+      phoneNumber,
+      waId,
+      externalUserId,
+      flowType: "support_request",
+      selectedOption: "owner_support",
+      step: "message",
+      data: {
+        flow_type: "support_request",
+        step: "message",
+        profile_name: profileName,
+        phone_number: phoneNumber
+      }
+    });
+    console.log("Started session", session);
+    return {
+      reply: "Please tell us what you need help with. Ruth’s PayRent team will review it.",
+      selectedOption: "owner_support",
+      selectedUserType: "owner",
+      sessionId: session.id,
+      skipSessionUpdate: true
+    };
+  }
+
+  return null;
+}
+
+function buildRegisteredHomeMenu(user) {
+  const name = String(user?.full_name || "").trim();
   return [
     name && name !== "Unknown" ? `Welcome back, ${name} ❤️` : "Welcome back to PayRent ❤️",
     "",
-    TENANT_HOME_MENU
+    homeMenuForUser(user)
   ].join("\n");
+}
+
+function homeMenuForUser(user) {
+  if (isOwnerUser(user)) return OWNER_HOME_MENU;
+  return TENANT_HOME_MENU;
+}
+
+function isOwnerUser(user) {
+  const roles = user?.roles || [];
+  return roles.includes("landlord") || roles.includes("property_manager");
+}
+
+function isTenantUser(user) {
+  const roles = user?.roles || [];
+  return roles.includes("tenant") || roles.length === 0;
+}
+
+function isOwnerSession(data) {
+  return String(data?.selected_option || data?.selectedOption || "").startsWith("owner_") ||
+    ["property_creation", "tenant_invitation"].includes(String(data?.flow_type || ""));
+}
+
+function menuForSessionData(data) {
+  return isOwnerSession(data) ? OWNER_HOME_MENU : TENANT_HOME_MENU;
 }
 
 function isWelcomeTrigger(normalized) {
@@ -945,6 +1124,14 @@ async function continueFlow(session, message) {
 
   if (flowType === "property_manager") {
     return continuePropertyManagerFlow(session, data, step, message);
+  }
+
+  if (flowType === "property_creation") {
+    return continuePropertyCreationFlow(session, data, step, message);
+  }
+
+  if (flowType === "tenant_invitation") {
+    return continueTenantInvitationFlow(session, data, step, message);
   }
 
   if (flowType === "set_pin") {
@@ -1170,7 +1357,7 @@ async function continueAiQuestionFlow(session, data, step, message) {
       reply: [
         reply,
         "",
-        "Reply 5 to ask another question, or MENU for options."
+        isOwnerSession(data) ? "Reply 4 to ask another question, or MENU for options." : "Reply 5 to ask another question, or MENU for options."
       ].join("\n"),
       skipSessionUpdate: true
     };
@@ -1197,13 +1384,13 @@ async function continueSupportRequestFlow(session, data, step, message) {
           "Thank you ❤️ Your support request has been received.",
           "The PayRent team will review it and follow up.",
           "",
-          TENANT_HOME_MENU
+          menuForSessionData(data)
         ].join("\n"),
         skipSessionUpdate: true
       };
     } catch (error) {
       console.error("Support Request Error:", error);
-      return { reply: `I could not save your support request right now.\n\n${TENANT_HOME_MENU}`, skipSessionUpdate: true };
+      return { reply: `I could not save your support request right now.\n\n${menuForSessionData(data)}`, skipSessionUpdate: true };
     }
   }
 
@@ -1271,7 +1458,9 @@ async function continueLandlordFlow(session, data, step, message) {
         "",
         "Your PayRent landlord profile has been created.",
         "",
-        "You can now create properties, invite tenants, and track rent collections as we open more tools for you."
+        "You can now create properties, invite tenants, and track rent collections.",
+        "",
+        OWNER_HOME_MENU
       ].join("\n"),
       skipSessionUpdate: true
     };
@@ -1335,13 +1524,169 @@ async function continuePropertyManagerFlow(session, data, step, message) {
         "",
         "Your PayRent property manager profile has been created.",
         "",
-        "You can now manage landlords, properties, tenants, and collections as we open more tools for you."
+        "You can now manage properties, tenants, and collections.",
+        "",
+        OWNER_HOME_MENU
       ].join("\n"),
       skipSessionUpdate: true
     };
   }
 
   console.log("Next step", "unknown");
+  return { reply: "Please reply MENU to restart or CANCEL to stop.", skipSessionUpdate: true };
+}
+
+async function continuePropertyCreationFlow(session, data, step, message) {
+  if (step === "property_name") {
+    const nextData = { ...data, property_name: message, step: "county" };
+    await service.advanceOnboardingFlow({ session, step: "county", data: nextData });
+    return { reply: "Which county is the property in?", skipSessionUpdate: true };
+  }
+
+  if (step === "county") {
+    const nextData = { ...data, county: message, city: message, step: "address" };
+    await service.advanceOnboardingFlow({ session, step: "address", data: nextData });
+    return { reply: "What is the property address or area? You can reply - to skip.", skipSessionUpdate: true };
+  }
+
+  if (step === "address") {
+    const nextData = {
+      ...data,
+      address: message === "-" ? "" : message,
+      step: "unit_number"
+    };
+    await service.advanceOnboardingFlow({ session, step: "unit_number", data: nextData });
+    return { reply: "What is the first unit number? Example: A1 or 12.", skipSessionUpdate: true };
+  }
+
+  if (step === "unit_number") {
+    const nextData = { ...data, unit_number: message, step: "monthly_rent" };
+    await service.advanceOnboardingFlow({ session, step: "monthly_rent", data: nextData });
+    return { reply: "What is the monthly rent for this unit?", skipSessionUpdate: true };
+  }
+
+  if (step === "monthly_rent") {
+    const amount = parseMoneyAmount(message);
+    if (!amount) return { reply: "Please enter the rent amount as a number. Example: 15000", skipSessionUpdate: true };
+
+    const nextData = { ...data, monthly_rent_amount: amount, step: "due_day" };
+    await service.advanceOnboardingFlow({ session, step: "due_day", data: nextData });
+    return { reply: "What day of the month is rent due? Reply a number from 1 to 30.", skipSessionUpdate: true };
+  }
+
+  if (step === "due_day") {
+    const rentDueDay = parseDueDay(message);
+    if (!rentDueDay) return { reply: "Please enter a valid rent due day from 1 to 30.", skipSessionUpdate: true };
+
+    const payload = {
+      ...data,
+      rent_due_day: rentDueDay,
+      phone_number: data.phone_number || session.phone_number
+    };
+
+    try {
+      const result = await service.createPropertyWithFirstUnit({
+        ownerPhoneNumber: payload.phone_number,
+        propertyName: payload.property_name,
+        address: payload.address || null,
+        city: payload.city || payload.county,
+        county: payload.county,
+        unitNumber: payload.unit_number,
+        monthlyRentAmount: Number(payload.monthly_rent_amount),
+        rentDueDay
+      });
+      await service.advanceOnboardingFlow({
+        session,
+        step: "complete",
+        data: { ...payload, step: "complete", property_id: result.property.id, unit_id: result.unit.id },
+        status: "completed"
+      });
+
+      return {
+        reply: [
+          "Property created successfully ❤️",
+          "",
+          `Property: ${result.property.name}`,
+          `Property ID: ${result.property.id}`,
+          `First unit: ${result.unit.unit_number}`,
+          `Unit ID: ${result.unit.id}`,
+          "",
+          "Use option 2 to invite a tenant to this unit.",
+          "",
+          OWNER_HOME_MENU
+        ].join("\n"),
+        skipSessionUpdate: true
+      };
+    } catch (error) {
+      console.error("Property Creation Error:", error);
+      return { reply: `I could not create the property right now.\nReason: ${error.message || "Save failed"}\n\n${OWNER_HOME_MENU}`, skipSessionUpdate: true };
+    }
+  }
+
+  return { reply: "Please reply MENU to restart or CANCEL to stop.", skipSessionUpdate: true };
+}
+
+async function continueTenantInvitationFlow(session, data, step, message) {
+  if (step === "property_id") {
+    const nextData = { ...data, property_id: message, step: "unit_id" };
+    await service.advanceOnboardingFlow({ session, step: "unit_id", data: nextData });
+    return { reply: "Please enter the Unit ID.", skipSessionUpdate: true };
+  }
+
+  if (step === "unit_id") {
+    const nextData = { ...data, unit_id: message, step: "tenant_phone" };
+    await service.advanceOnboardingFlow({ session, step: "tenant_phone", data: nextData });
+    return { reply: "What is the tenant’s WhatsApp phone number? Include country code. Example: +2547...", skipSessionUpdate: true };
+  }
+
+  if (step === "tenant_phone") {
+    const nextData = { ...data, tenant_phone_number: normalizeWhatsAppPhone(message), step: "custom_code" };
+    await service.advanceOnboardingFlow({ session, step: "custom_code", data: nextData });
+    return { reply: "Do you want to set a custom invitation code? Reply with the code, or reply - to auto-generate.", skipSessionUpdate: true };
+  }
+
+  if (step === "custom_code") {
+    const payload = {
+      ...data,
+      invitation_code: message === "-" ? null : message,
+      phone_number: data.phone_number || session.phone_number
+    };
+
+    try {
+      const result = await service.inviteTenant({
+        ownerPhoneNumber: payload.phone_number,
+        propertyId: payload.property_id,
+        unitId: payload.unit_id,
+        tenantPhoneNumber: payload.tenant_phone_number,
+        code: payload.invitation_code || null
+      });
+      const inviteMessage = [
+        "Tenant invitation created ❤️",
+        "",
+        `Tenant phone: ${payload.tenant_phone_number}`,
+        `Property: ${result.property.name}`,
+        `Unit: ${result.unit.unit_number}`,
+        `Invitation code: ${result.invitation.code}`,
+        "",
+        "Share this code with the tenant. They can message PayRent and choose Tenant registration.",
+        "",
+        OWNER_HOME_MENU
+      ].join("\n");
+
+      await service.advanceOnboardingFlow({
+        session,
+        step: "complete",
+        data: { ...payload, step: "complete", invitation_code: result.invitation.code },
+        status: "completed"
+      });
+
+      return { reply: inviteMessage, skipSessionUpdate: true };
+    } catch (error) {
+      console.error("Tenant Invitation Error:", error);
+      return { reply: `I could not create the tenant invitation right now.\nReason: ${error.message || "Save failed"}\n\n${OWNER_HOME_MENU}`, skipSessionUpdate: true };
+    }
+  }
+
   return { reply: "Please reply MENU to restart or CANCEL to stop.", skipSessionUpdate: true };
 }
 
@@ -1435,6 +1780,44 @@ function buildPaymentHistory({ payments }) {
     ...lines,
     "",
     TENANT_HOME_MENU
+  ].join("\n");
+}
+
+function buildOwnerPortfolioSummary({ properties, units }, fullName) {
+  if (!properties || properties.length === 0) {
+    return [
+      `Hi ${fullName || "there"} ❤️`,
+      "",
+      "You do not have any PayRent properties yet.",
+      "Reply 1 to create your first property.",
+      "",
+      OWNER_HOME_MENU
+    ].join("\n");
+  }
+
+  const lines = properties.slice(0, 5).flatMap((property, index) => {
+    const propertyUnits = (units || []).filter((unit) => unit.property_id === property.id);
+    const firstUnits = propertyUnits.slice(0, 3).map((unit) => {
+      return `   Unit ${unit.unit_number}: ${unit.id} - KES ${formatKes(unit.monthly_rent_amount)} due day ${unit.rent_due_day}`;
+    });
+    return [
+      `${index + 1}. ${property.name} (${property.county || property.city || "Kenya"})`,
+      `   Property ID: ${property.id}`,
+      `   Units: ${propertyUnits.length}`,
+      ...firstUnits
+    ];
+  });
+
+  return [
+    `Hi ${fullName || "there"} ❤️`,
+    "",
+    "Your PayRent property summary:",
+    "",
+    ...lines,
+    "",
+    "Use option 2 to invite a tenant. You will need the Property ID and Unit ID.",
+    "",
+    OWNER_HOME_MENU
   ].join("\n");
 }
 
@@ -1774,7 +2157,7 @@ async function handleFormSubmission({ req, res, flowName }) {
       Object.entries(form).filter(([key]) => !["wa_id", "source"].includes(key))
     );
     const phoneNumber = payload.phone_number || payload.tenant_phone_number || form.phone || "";
-    const existingUser = await getRegisteredUserRecord(phoneNumber);
+    const existingUser = await getRegisteredUserForDecision(phoneNumber);
     if (existingUser) {
       const alreadyMessage = alreadyRegisteredWhatsAppMessage(existingUser);
       const outbound = await trySendWhatsAppBodyAndSave({
@@ -1982,7 +2365,7 @@ function buildFormResultMessage({ mainMessage, outbound }) {
 async function renderRegistrationFormOrAlreadyRegistered({ phoneNumber, formHtml }) {
   if (!phoneNumber) return formHtml;
 
-  const registeredUser = await getRegisteredUserRecord(phoneNumber);
+  const registeredUser = await getRegisteredUserForDecision(phoneNumber);
   if (!registeredUser) return formHtml;
 
   return renderSuccessPage({

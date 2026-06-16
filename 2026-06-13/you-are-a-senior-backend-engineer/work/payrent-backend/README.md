@@ -560,3 +560,45 @@ curl -X POST http://localhost:3000/api/register/landlord \
     "signupChannel": "web"
   }'
 ```
+
+## 6. Current live WhatsApp launch checks
+
+New user:
+
+```text
+Hi -> welcome menu
+1 -> tenant registration link
+2 -> landlord registration link
+3 -> property manager registration link
+4 -> save towards rent link
+```
+
+Registered tenant:
+
+```text
+MENU -> tenant home menu
+1 -> rent goal
+2 -> save towards rent
+3 -> set transaction PIN
+4 -> payment history
+5 -> PayRent AI
+6 -> support request
+```
+
+Registered landlord or property manager:
+
+```text
+MENU -> owner home menu
+1 -> create property and first unit
+2 -> invite tenant with property/unit IDs
+3 -> property summary with property/unit IDs
+4 -> PayRent AI
+5 -> support request
+```
+
+AI:
+
+```text
+Any normal question outside an active flow is routed to the PayRent AI assistant.
+If OpenAI is unavailable, PayRent returns a short fallback explaining the product and menu options.
+```
