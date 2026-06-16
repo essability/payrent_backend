@@ -1396,7 +1396,7 @@ function parseMoneyAmount(value) {
 
 function parseDueDay(value) {
   const day = Number.parseInt(String(value || "").replace(/[^\d]/g, ""), 10);
-  return Number.isInteger(day) && day >= 1 && day <= 31 ? day : null;
+  return Number.isInteger(day) && day >= 1 && day <= 30 ? day : null;
 }
 
 function normalizeSavingsFrequency(value) {
@@ -1742,7 +1742,7 @@ async function processWebRegistration({ flowName, payload, phoneNumber }) {
     const monthlyRentAmount = parseMoneyAmount(payload.monthly_rent_amount);
     const rentDueDay = parseDueDay(payload.rent_due_day);
     if (!monthlyRentAmount) throw new Error("Monthly rent amount is required.");
-    if (!rentDueDay) throw new Error("Rent due day must be between 1 and 31.");
+    if (!rentDueDay) throw new Error("Rent due day must be between 1 and 30.");
 
     return service.createTenantFromFlow({
       fullName: payload.full_name,
@@ -1753,7 +1753,7 @@ async function processWebRegistration({ flowName, payload, phoneNumber }) {
       invitationCode: payload.invitation_code || null,
       monthlyRentAmount,
       rentDueDay,
-      signupChannel: "web_form"
+      signupChannel: "web"
     });
   }
 
@@ -1761,7 +1761,7 @@ async function processWebRegistration({ flowName, payload, phoneNumber }) {
     const monthlyRentAmount = parseMoneyAmount(payload.monthly_rent_amount);
     const rentDueDay = parseDueDay(payload.rent_due_day);
     if (!monthlyRentAmount) throw new Error("Monthly rent amount is required.");
-    if (!rentDueDay) throw new Error("Rent due day must be between 1 and 31.");
+    if (!rentDueDay) throw new Error("Rent due day must be between 1 and 30.");
 
     return service.createSaveTowardsRentGoal({
       fullName: payload.full_name,
@@ -1771,7 +1771,7 @@ async function processWebRegistration({ flowName, payload, phoneNumber }) {
       rentDueDay,
       savingsFrequency: normalizeSavingsFrequency(payload.savings_frequency) || "monthly",
       targetStartDate: payload.target_start_date || null,
-      signupChannel: "web_form"
+      signupChannel: "web"
     });
   }
 
@@ -1859,15 +1859,11 @@ function renderTenantRegistrationForm({ phoneNumber, waId }) {
     hidden: { wa_id: waId },
     fields: [
       inputField("Full Name", "full_name", "text", "", true),
-      inputField("Phone Number", "phone_number", "tel", phoneNumber, true),
+      lockedPhoneField(phoneNumber),
       inputField("Kenya ID Number", "national_id_number", "text", "", true),
-      selectField("Do you have an invitation code?", "has_invitation_code", [
-        ["no", "No"],
-        ["yes", "Yes"]
-      ]),
-      inputField("Invitation Code", "invitation_code", "text", "", false),
-      inputField("Monthly Rent Amount", "monthly_rent_amount", "text", "", true),
-      inputField("Rent Due Day", "rent_due_day", "text", "", true)
+      hiddenField("has_invitation_code", "no"),
+      moneyField("Monthly Rent Amount", "monthly_rent_amount"),
+      dueDayField("Rent Due Day", "rent_due_day")
     ],
     submitLabel: "Create tenant profile"
   });
@@ -1881,10 +1877,10 @@ function renderSaveTowardsRentForm({ phoneNumber, waId }) {
     hidden: { wa_id: waId },
     fields: [
       inputField("Full Name", "full_name", "text", "", true),
-      inputField("Phone Number", "phone_number", "tel", phoneNumber, true),
+      lockedPhoneField(phoneNumber),
       inputField("Kenya ID Number", "national_id_number", "text", "", true),
-      inputField("Monthly Rent Amount", "monthly_rent_amount", "text", "", true),
-      inputField("Rent Due Day", "rent_due_day", "text", "", true),
+      moneyField("Monthly Rent Amount", "monthly_rent_amount"),
+      dueDayField("Rent Due Day", "rent_due_day"),
       selectField("Savings Frequency", "savings_frequency", [
         ["daily", "Daily"],
         ["weekly", "Weekly"],
@@ -1904,7 +1900,7 @@ function renderLandlordRegistrationForm({ phoneNumber, waId }) {
     hidden: { wa_id: waId },
     fields: [
       inputField("Full Name", "full_name", "text", "", true),
-      inputField("Phone Number", "phone_number", "tel", phoneNumber, true),
+      lockedPhoneField(phoneNumber),
       inputField("Kenya ID Number", "national_id_number", "text", "", true),
       selectField("Landlord Type", "landlord_type", [
         ["individual_landlord", "Individual Landlord"],
@@ -1914,7 +1910,7 @@ function renderLandlordRegistrationForm({ phoneNumber, waId }) {
       inputField("Company Name", "company_name", "text", "", false),
       inputField("Property Name", "property_name", "text", "", true),
       inputField("County", "county", "text", "", true),
-      inputField("Number of Units", "units_count", "text", "", false),
+      numberField("Number of Units", "units_count", "", false),
       selectField("Current Rent Collection Method", "payment_method", [
         ["mpesa", "M-PESA"],
         ["bank", "Bank"],
@@ -1933,10 +1929,10 @@ function renderPropertyManagerRegistrationForm({ phoneNumber, waId }) {
     hidden: { wa_id: waId },
     fields: [
       inputField("Full Name", "full_name", "text", "", true),
-      inputField("Phone Number", "phone_number", "tel", phoneNumber, true),
+      lockedPhoneField(phoneNumber),
       inputField("Kenya ID Number", "national_id_number", "text", "", true),
       inputField("Company Name", "company_name", "text", "", true),
-      inputField("Number of Properties Managed", "properties_count", "text", "", false),
+      numberField("Number of Properties Managed", "properties_count", "", false),
       inputField("Main County", "county", "text", "", true)
     ],
     submitLabel: "Create property manager profile"
@@ -2092,6 +2088,34 @@ function buildReturnToWhatsAppUrl({ text }) {
 function inputField(label, name, type, value, required) {
   return `<label>${escapeHtml(label)}
     <input type="${escapeHtml(type)}" name="${escapeHtml(name)}" value="${escapeHtml(value)}" ${required ? "required" : ""}>
+  </label>`;
+}
+
+function hiddenField(name, value) {
+  return `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`;
+}
+
+function lockedPhoneField(value) {
+  return `<label>Phone Number
+    <input type="tel" name="phone_number" value="${escapeHtml(value)}" readonly aria-readonly="true" required>
+  </label>`;
+}
+
+function moneyField(label, name) {
+  return `<label>${escapeHtml(label)}
+    <input type="number" name="${escapeHtml(name)}" inputmode="decimal" min="1" step="1" required>
+  </label>`;
+}
+
+function dueDayField(label, name) {
+  return `<label>${escapeHtml(label)}
+    <input type="number" name="${escapeHtml(name)}" inputmode="numeric" min="1" max="30" step="1" required>
+  </label>`;
+}
+
+function numberField(label, name, value = "", required = false) {
+  return `<label>${escapeHtml(label)}
+    <input type="number" name="${escapeHtml(name)}" value="${escapeHtml(value)}" inputmode="numeric" min="0" step="1" ${required ? "required" : ""}>
   </label>`;
 }
 
