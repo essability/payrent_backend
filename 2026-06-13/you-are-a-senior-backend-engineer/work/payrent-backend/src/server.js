@@ -95,6 +95,32 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (req.method === "GET" && url.pathname === "/forms/landlord-registration") {
+      sendText(
+        res,
+        200,
+        renderLandlordRegistrationForm({
+          phoneNumber: url.searchParams.get("phone") || "",
+          waId: url.searchParams.get("wa_id") || ""
+        }),
+        "text/html; charset=utf-8"
+      );
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/forms/property-manager-registration") {
+      sendText(
+        res,
+        200,
+        renderPropertyManagerRegistrationForm({
+          phoneNumber: url.searchParams.get("phone") || "",
+          waId: url.searchParams.get("wa_id") || ""
+        }),
+        "text/html; charset=utf-8"
+      );
+      return;
+    }
+
     if (req.method === "POST" && url.pathname === "/forms/tenant-registration") {
       await handleFormSubmission({
         req,
@@ -109,6 +135,24 @@ const server = http.createServer(async (req, res) => {
         req,
         res,
         flowName: "save_towards_rent"
+      });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/forms/landlord-registration") {
+      await handleFormSubmission({
+        req,
+        res,
+        flowName: "landlord_registration"
+      });
+      return;
+    }
+
+    if (req.method === "POST" && url.pathname === "/forms/property-manager-registration") {
+      await handleFormSubmission({
+        req,
+        res,
+        flowName: "property_manager_registration"
       });
       return;
     }
@@ -371,6 +415,8 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, waId, externalU
   const normalized = text.toLowerCase();
   const tenantFormUrl = buildFormUrl(formBaseUrl, "/forms/tenant-registration", phoneNumber);
   const saveFormUrl = buildFormUrl(formBaseUrl, "/forms/save-towards-rent", phoneNumber);
+  const landlordFormUrl = buildFormUrl(formBaseUrl, "/forms/landlord-registration", phoneNumber);
+  const propertyManagerFormUrl = buildFormUrl(formBaseUrl, "/forms/property-manager-registration", phoneNumber);
 
   if (normalized === "cancel" && activeSession) {
     await service.cancelOnboardingFlow(activeSession);
@@ -487,153 +533,69 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, waId, externalU
   }
 
   if (normalized === "1") {
-    const session = await service.startOnboardingFlow({
-      phoneNumber,
-      waId,
-      externalUserId,
-      flowType: "tenant",
-      selectedOption: "1",
-      step: "full_name",
-      data: {
-        flow_type: "tenant",
-        step: "full_name",
-        profile_name: profileName,
-        phone_number: phoneNumber,
-        mpesa_number: phoneNumber
-      }
-    });
-    console.log("Started session", session);
-
     return {
       reply: [
         "Beautiful choice ❤️",
         "",
-        "I’m sending the Tenant Registration WhatsApp form button now.",
+        "Please complete your Tenant Registration using this secure PayRent link:",
         "",
-        "If the button does not appear in Sandbox, we can continue here.",
-        "",
-        "Last resort web form:",
         tenantFormUrl,
         "",
-        "First, what is your full name?"
+        "Once you submit, I’ll send your WhatsApp confirmation here."
       ].join("\n"),
       selectedOption: "1",
       selectedUserType: "tenant",
-      flowName: "tenant_registration",
-      currentStep: "full_name",
-      sessionData: session.data,
-      sessionId: session.id,
       skipSessionUpdate: true
     };
   }
 
   if (normalized === "4") {
-    const session = await service.startOnboardingFlow({
-      phoneNumber,
-      waId,
-      externalUserId,
-      flowType: "save_towards_rent",
-      selectedOption: "4",
-      step: "full_name",
-      data: {
-        flow_type: "save_towards_rent",
-        step: "full_name",
-        profile_name: profileName,
-        phone_number: phoneNumber,
-        mpesa_number: phoneNumber
-      }
-    });
-    console.log("Started session", session);
-
     return {
       reply: [
         "Beautiful choice ❤️",
         "",
-        "I’m sending the Save Towards Rent WhatsApp form button now.",
+        "Please create your rent savings goal using this secure PayRent link:",
         "",
-        "If the button does not appear in Sandbox, we can continue here.",
-        "",
-        "Last resort web form:",
         saveFormUrl,
         "",
-        "First, what is your full name?"
+        "Once you submit, I’ll send your WhatsApp confirmation here."
       ].join("\n"),
       selectedOption: "4",
       selectedUserType: "save_towards_rent",
-      flowName: "save_towards_rent",
-      currentStep: "full_name",
-      sessionData: session.data,
-      sessionId: session.id,
       skipSessionUpdate: true
     };
   }
 
   if (normalized === "2") {
-    const session = await service.startOnboardingFlow({
-      phoneNumber,
-      waId,
-      externalUserId,
-      flowType: "landlord",
-      selectedOption: "2",
-      step: "full_name",
-      data: {
-        flow_type: "landlord",
-        step: "full_name",
-        profile_name: profileName,
-        phone_number: phoneNumber,
-        mpesa_number: phoneNumber
-      }
-    });
-    console.log("Started session", session);
-
     return {
       reply: [
         "Beautiful choice ❤️",
         "",
-        "Let’s register you as a PayRent landlord.",
+        "Please complete your Landlord Registration using this secure PayRent link:",
         "",
-        "First, what is your full name?"
+        landlordFormUrl,
+        "",
+        "Once you submit, I’ll send your WhatsApp confirmation here."
       ].join("\n"),
       selectedOption: "2",
       selectedUserType: "landlord",
-      currentStep: "full_name",
-      sessionData: session.data,
-      sessionId: session.id,
       skipSessionUpdate: true
     };
   }
 
   if (normalized === "3") {
-    const session = await service.startOnboardingFlow({
-      phoneNumber,
-      waId,
-      externalUserId,
-      flowType: "property_manager",
-      selectedOption: "3",
-      step: "full_name",
-      data: {
-        flow_type: "property_manager",
-        step: "full_name",
-        profile_name: profileName,
-        phone_number: phoneNumber,
-        mpesa_number: phoneNumber
-      }
-    });
-    console.log("Started session", session);
-
     return {
       reply: [
         "Beautiful choice ❤️",
         "",
-        "Let’s register you as a PayRent property manager.",
+        "Please complete your Property Manager Registration using this secure PayRent link:",
         "",
-        "First, what is your full name?"
+        propertyManagerFormUrl,
+        "",
+        "Once you submit, I’ll send your WhatsApp confirmation here."
       ].join("\n"),
       selectedOption: "3",
       selectedUserType: "property_manager",
-      currentStep: "full_name",
-      sessionData: session.data,
-      sessionId: session.id,
       skipSessionUpdate: true
     };
   }
@@ -1729,13 +1691,8 @@ async function handleFormSubmission({ req, res, flowName }) {
       Object.entries(form).filter(([key]) => !["wa_id", "source"].includes(key))
     );
     const phoneNumber = payload.phone_number || payload.tenant_phone_number || form.phone || "";
-    const result = await flowProcessor.process({
-      flowName,
-      source: "whatsapp_in_app_web_form",
-      phoneNumber,
-      payload
-    });
-    const confirmation = flowProcessor.confirmationMessage(flowName, payload);
+    await processWebRegistration({ flowName, payload, phoneNumber });
+    const confirmation = webFormConfirmationMessage(flowName, payload);
 
     if (phoneNumber) {
       sendWhatsAppBodyInBackground({
@@ -1745,7 +1702,7 @@ async function handleFormSubmission({ req, res, flowName }) {
     }
 
     sendText(res, 200, renderSuccessPage(confirmation), "text/html; charset=utf-8");
-    console.log(`${flowName} web form processed:`, result.submissionId);
+    console.log(`${flowName} web form processed for:`, phoneNumber);
   } catch (error) {
     console.error("Web Form Error:", error);
     sendText(
@@ -1757,6 +1714,102 @@ async function handleFormSubmission({ req, res, flowName }) {
   }
 }
 
+async function processWebRegistration({ flowName, payload, phoneNumber }) {
+  if (flowName === "tenant_registration") {
+    return service.createTenantFromFlow({
+      fullName: payload.full_name,
+      phoneNumber,
+      email: payload.email || null,
+      nationalIdNumber: payload.national_id_number || payload.id_number || null,
+      hasInvitationCode: payload.has_invitation_code,
+      invitationCode: payload.invitation_code || null,
+      monthlyRentAmount: parseMoneyAmount(payload.monthly_rent_amount),
+      rentDueDay: Number.parseInt(payload.rent_due_day, 10),
+      signupChannel: "web_form"
+    });
+  }
+
+  if (flowName === "save_towards_rent") {
+    return service.createSaveTowardsRentGoal({
+      fullName: payload.full_name,
+      phoneNumber,
+      nationalIdNumber: payload.national_id_number || payload.id_number || null,
+      monthlyRentAmount: parseMoneyAmount(payload.monthly_rent_amount),
+      rentDueDay: Number.parseInt(payload.rent_due_day, 10),
+      savingsFrequency: normalizeSavingsFrequency(payload.savings_frequency) || "monthly",
+      targetStartDate: payload.target_start_date || null,
+      signupChannel: "web_form"
+    });
+  }
+
+  if (flowName === "landlord_registration") {
+    return service.createLandlordFromChat({
+      ...payload,
+      phone_number: phoneNumber,
+      national_id_number: payload.national_id_number || payload.id_number || null
+    });
+  }
+
+  if (flowName === "property_manager_registration") {
+    return service.createPropertyManagerFromChat({
+      ...payload,
+      phone_number: phoneNumber,
+      national_id_number: payload.national_id_number || payload.id_number || null
+    });
+  }
+
+  throw new Error(`Unsupported web registration flow: ${flowName}`);
+}
+
+function webFormConfirmationMessage(flowName, payload) {
+  const name = payload.full_name || "there";
+  if (flowName === "tenant_registration") {
+    return [
+      `Congratulations ${name} ❤️`,
+      "",
+      "Your PayRent tenant registration is complete.",
+      "You can now track your rent goal, save towards rent, set your PIN, and ask PayRent AI for help.",
+      "",
+      "Reply MENU to continue."
+    ].join("\n");
+  }
+
+  if (flowName === "save_towards_rent") {
+    return [
+      `Beautiful, ${name} ❤️`,
+      "",
+      "Your PayRent rent savings goal has been created.",
+      "We’ll help you prepare for rent step by step.",
+      "",
+      "Reply MENU to continue."
+    ].join("\n");
+  }
+
+  if (flowName === "landlord_registration") {
+    return [
+      `Congratulations ${name} ❤️`,
+      "",
+      "Your PayRent landlord profile has been created.",
+      "You can now prepare to add properties, invite tenants, and track collections.",
+      "",
+      "Reply MENU to continue."
+    ].join("\n");
+  }
+
+  if (flowName === "property_manager_registration") {
+    return [
+      `Congratulations ${name} ❤️`,
+      "",
+      "Your PayRent property manager profile has been created.",
+      "You can now prepare to manage landlords, properties, tenants, and collections.",
+      "",
+      "Reply MENU to continue."
+    ].join("\n");
+  }
+
+  return "Congratulations ❤️ Your PayRent registration is complete. Reply MENU to continue.";
+}
+
 function renderTenantRegistrationForm({ phoneNumber, waId }) {
   return renderFormPage({
     title: "Tenant Registration",
@@ -1766,6 +1819,7 @@ function renderTenantRegistrationForm({ phoneNumber, waId }) {
     fields: [
       inputField("Full Name", "full_name", "text", "", true),
       inputField("Phone Number", "phone_number", "tel", phoneNumber, true),
+      inputField("Kenya ID Number", "national_id_number", "text", "", true),
       inputField("Email", "email", "email", "", false),
       selectField("Do you have an invitation code?", "has_invitation_code", [
         ["no", "No"],
@@ -1788,6 +1842,7 @@ function renderSaveTowardsRentForm({ phoneNumber, waId }) {
     fields: [
       inputField("Full Name", "full_name", "text", "", true),
       inputField("Phone Number", "phone_number", "tel", phoneNumber, true),
+      inputField("Kenya ID Number", "national_id_number", "text", "", true),
       inputField("Monthly Rent Amount", "monthly_rent_amount", "number", "", true),
       inputField("Rent Due Day", "rent_due_day", "number", "", true),
       selectField("Savings Frequency", "savings_frequency", [
@@ -1798,6 +1853,55 @@ function renderSaveTowardsRentForm({ phoneNumber, waId }) {
       inputField("Target Start Date", "target_start_date", "date", "", false)
     ],
     submitLabel: "Create savings goal"
+  });
+}
+
+function renderLandlordRegistrationForm({ phoneNumber, waId }) {
+  return renderFormPage({
+    title: "Landlord Registration",
+    intro: "Create your PayRent landlord profile and first property record.",
+    action: "/forms/landlord-registration",
+    hidden: { wa_id: waId },
+    fields: [
+      inputField("Full Name", "full_name", "text", "", true),
+      inputField("Phone Number", "phone_number", "tel", phoneNumber, true),
+      inputField("Email", "email", "email", "", false),
+      inputField("Kenya ID Number", "national_id_number", "text", "", true),
+      selectField("Landlord Type", "landlord_type", [
+        ["individual_landlord", "Individual Landlord"],
+        ["company", "Company"],
+        ["property_owner", "Property Owner"]
+      ]),
+      inputField("Company Name", "company_name", "text", "", false),
+      inputField("Property Name", "property_name", "text", "", true),
+      inputField("County", "county", "text", "", true),
+      inputField("Number of Units", "units_count", "number", "", false),
+      selectField("Current Rent Collection Method", "payment_method", [
+        ["mpesa", "M-PESA"],
+        ["bank", "Bank"],
+        ["cash", "Cash"]
+      ])
+    ],
+    submitLabel: "Create landlord profile"
+  });
+}
+
+function renderPropertyManagerRegistrationForm({ phoneNumber, waId }) {
+  return renderFormPage({
+    title: "Property Manager Registration",
+    intro: "Create your PayRent property manager profile.",
+    action: "/forms/property-manager-registration",
+    hidden: { wa_id: waId },
+    fields: [
+      inputField("Full Name", "full_name", "text", "", true),
+      inputField("Phone Number", "phone_number", "tel", phoneNumber, true),
+      inputField("Email", "email", "email", "", false),
+      inputField("Kenya ID Number", "national_id_number", "text", "", true),
+      inputField("Company Name", "company_name", "text", "", true),
+      inputField("Number of Properties Managed", "properties_count", "number", "", false),
+      inputField("Main County", "county", "text", "", true)
+    ],
+    submitLabel: "Create property manager profile"
   });
 }
 

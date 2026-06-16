@@ -273,37 +273,46 @@ export class PayRentService {
 
     let property = null;
     if (payload.property_name) {
-      property = await this.db.insert("properties", {
-        landlord_user_id: result.user.id,
-        property_manager_user_id: null,
-        name: payload.property_name,
-        address: null,
-        city: payload.county || "Unknown",
-        county: payload.county || "Unknown",
-        country: "Kenya"
-      });
+      try {
+        property = await this.db.insert("properties", {
+          landlord_user_id: result.user.id,
+          property_manager_user_id: null,
+          name: payload.property_name,
+          address: null,
+          city: payload.county || "Unknown",
+          county: payload.county || "Unknown",
+          country: "Kenya"
+        });
+      } catch (error) {
+        console.error("Landlord property insert failed; profile was still created:", error);
+      }
     }
 
-    const submission = await this.db.insert("flow_submissions", {
-      flow_name: "landlord_registration",
-      source: "whatsapp_chat_fallback",
-      phone_number: payload.phone_number,
-      user_id: result.user.id,
-      payload,
-      result: {
+    let submission = null;
+    try {
+      submission = await this.db.insert("flow_submissions", {
+        flow_name: "landlord_registration",
+        source: "whatsapp_chat_fallback",
+        phone_number: payload.phone_number,
         user_id: result.user.id,
-        profile_id: result.profile.id,
-        property_id: property?.id || null
-      },
-      status: "processed",
-      submission_summary: {
-        full_name: payload.full_name,
-        property_name: payload.property_name || null,
-        county: payload.county || null,
-        units_count: payload.units_count || null,
-        payment_method: payload.payment_method || null
-      }
-    });
+        payload,
+        result: {
+          user_id: result.user.id,
+          profile_id: result.profile.id,
+          property_id: property?.id || null
+        },
+        status: "processed",
+        submission_summary: {
+          full_name: payload.full_name,
+          property_name: payload.property_name || null,
+          county: payload.county || null,
+          units_count: payload.units_count || null,
+          payment_method: payload.payment_method || null
+        }
+      });
+    } catch (error) {
+      console.error("Landlord flow submission logging failed; profile was still created:", error);
+    }
 
     return { ...result, property, submission };
   }
@@ -340,24 +349,29 @@ export class PayRentService {
       signupChannel: "whatsapp"
     });
 
-    const submission = await this.db.insert("flow_submissions", {
-      flow_name: "property_manager_registration",
-      source: "whatsapp_chat_fallback",
-      phone_number: payload.phone_number,
-      user_id: result.user.id,
-      payload,
-      result: {
+    let submission = null;
+    try {
+      submission = await this.db.insert("flow_submissions", {
+        flow_name: "property_manager_registration",
+        source: "whatsapp_chat_fallback",
+        phone_number: payload.phone_number,
         user_id: result.user.id,
-        profile_id: result.profile.id
-      },
-      status: "processed",
-      submission_summary: {
-        full_name: payload.full_name,
-        company_name: payload.company_name || null,
-        properties_count: payload.properties_count || null,
-        county: payload.county || null
-      }
-    });
+        payload,
+        result: {
+          user_id: result.user.id,
+          profile_id: result.profile.id
+        },
+        status: "processed",
+        submission_summary: {
+          full_name: payload.full_name,
+          company_name: payload.company_name || null,
+          properties_count: payload.properties_count || null,
+          county: payload.county || null
+        }
+      });
+    } catch (error) {
+      console.error("Property manager flow submission logging failed; profile was still created:", error);
+    }
 
     return { ...result, submission };
   }
