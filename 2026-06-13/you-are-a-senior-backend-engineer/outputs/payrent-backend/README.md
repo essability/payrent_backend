@@ -43,6 +43,7 @@ OPENAI_MODEL=gpt-4o-mini
 TWILIO_AUTH_TOKEN=your-twilio-auth-token
 TWILIO_ACCOUNT_SID=your-twilio-account-sid
 TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
+# TWILIO_WHATSAPP_NUMBER is also accepted as an alias for TWILIO_WHATSAPP_FROM.
 TWILIO_WHATSAPP_FLOW_IDS={"tenant_registration":"your_tenant_flow_id","save_towards_rent":"your_save_flow_id"}
 TWILIO_FLOW_CONTENT_SIDS={"tenant_registration":"HX...","save_towards_rent":"HX...","set_transaction_pin":"HX...","savings_deposit":"HX...","rent_payment":"HX..."}
 ```

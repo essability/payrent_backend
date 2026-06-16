@@ -60,12 +60,14 @@ const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host}`);
 
     if (req.method === "GET" && url.pathname === "/health") {
+      const missingTwilioVars = getMissingTwilioOutboundVars();
       sendJson(res, 200, {
         ok: true,
         service: "payrent-backend",
         aiConfigured: Boolean(config.openaiApiKey),
         openaiModel: config.openaiModel,
-        twilioOutboundConfigured: Boolean(config.twilioAccountSid && config.twilioAuthToken && config.twilioWhatsAppFrom)
+        twilioOutboundConfigured: missingTwilioVars.length === 0,
+        missingTwilioVars
       });
       return;
     }
@@ -430,6 +432,14 @@ function publicBaseUrlFromRequest(req) {
   const proto = req.headers["x-forwarded-proto"] || "https";
   const host = req.headers["x-forwarded-host"] || req.headers.host;
   return `${proto}://${host}`;
+}
+
+function getMissingTwilioOutboundVars() {
+  const missing = [];
+  if (!config.twilioAccountSid) missing.push("TWILIO_ACCOUNT_SID");
+  if (!config.twilioAuthToken) missing.push("TWILIO_AUTH_TOKEN");
+  if (!config.twilioWhatsAppFrom) missing.push("TWILIO_WHATSAPP_FROM or TWILIO_WHATSAPP_NUMBER");
+  return missing;
 }
 
 async function decidePayRentWelcomeReply({ message, phoneNumber, waId, externalUserId, profileName, formBaseUrl, activeSession }) {

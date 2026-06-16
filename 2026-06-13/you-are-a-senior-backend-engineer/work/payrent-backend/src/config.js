@@ -6,7 +6,7 @@ export function getConfig() {
     apiSecret: process.env.API_SECRET,
     twilioAuthToken: process.env.TWILIO_AUTH_TOKEN,
     twilioAccountSid: process.env.TWILIO_ACCOUNT_SID,
-    twilioWhatsAppFrom: process.env.TWILIO_WHATSAPP_FROM,
+    twilioWhatsAppFrom: process.env.TWILIO_WHATSAPP_FROM || process.env.TWILIO_WHATSAPP_NUMBER,
     twilioFlowContentSids: parseJsonEnv(process.env.TWILIO_FLOW_CONTENT_SIDS, {}),
     twilioWhatsAppFlowIds: parseJsonEnv(process.env.TWILIO_WHATSAPP_FLOW_IDS, {}),
     publicBaseUrl: process.env.PUBLIC_BASE_URL,
