@@ -64,7 +64,8 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         service: "payrent-backend",
         aiConfigured: Boolean(config.openaiApiKey),
-        openaiModel: config.openaiModel
+        openaiModel: config.openaiModel,
+        twilioOutboundConfigured: Boolean(config.twilioAccountSid && config.twilioAuthToken && config.twilioWhatsAppFrom)
       });
       return;
     }
@@ -672,6 +673,15 @@ async function getRegisteredUserForDecision(phoneNumber) {
     return null;
   } catch (error) {
     console.error("Registered User Lookup Error:", error);
+    return null;
+  }
+}
+
+async function getRegisteredUserRecord(phoneNumber) {
+  try {
+    return await service.findUserByPhone(phoneNumber, { required: false });
+  } catch (error) {
+    console.error("Registered User Record Lookup Error:", error);
     return null;
   }
 }
@@ -1666,22 +1676,50 @@ function buildNativeFlowContentVariables({ flowName, profileName, phoneNumber })
 function sendWhatsAppBodyInBackground({ to, body }) {
   setImmediate(async () => {
     try {
-      await sendWhatsAppBody({ to, body });
-      console.log("Outbound WhatsApp sent:", { to, body });
-      await service.saveMessage({
-        phoneNumber: to,
-        direction: "assistant",
-        body,
-        channel: "whatsapp"
-      });
+      await sendWhatsAppBodyAndSave({ to, body });
     } catch (error) {
       console.error("Outbound WhatsApp Error:", error);
     }
   });
 }
 
+async function sendWhatsAppBodyAndSave({ to, body }) {
+  const result = await sendWhatsAppBody({ to, body });
+  console.log("Outbound WhatsApp sent:", {
+    to,
+    sid: result?.sid,
+    status: result?.status
+  });
+
+  try {
+    await service.saveMessage({
+      phoneNumber: to,
+      direction: "assistant",
+      body,
+      channel: "whatsapp"
+    });
+  } catch (error) {
+    console.error("Outbound WhatsApp Message Save Error:", error);
+  }
+
+  return result;
+}
+
+async function trySendWhatsAppBodyAndSave({ to, body }) {
+  try {
+    const result = await sendWhatsAppBodyAndSave({ to, body });
+    return { sent: true, result };
+  } catch (error) {
+    console.error("Outbound WhatsApp Error:", {
+      to,
+      error
+    });
+    return { sent: false, error };
+  }
+}
+
 async function sendWhatsAppBody({ to, body }) {
-  await sendTwilioWhatsAppMessage({
+  return sendTwilioWhatsAppMessage({
     accountSid: config.twilioAccountSid,
     authToken: config.twilioAuthToken,
     from: config.twilioWhatsAppFrom,
@@ -1726,21 +1764,41 @@ async function handleFormSubmission({ req, res, flowName }) {
       Object.entries(form).filter(([key]) => !["wa_id", "source"].includes(key))
     );
     const phoneNumber = payload.phone_number || payload.tenant_phone_number || form.phone || "";
-    await processWebRegistration({ flowName, payload, phoneNumber });
-    const confirmation = webFormConfirmationMessage(flowName, payload);
-
-    if (phoneNumber) {
-      sendWhatsAppBodyInBackground({
+    const existingUser = await getRegisteredUserRecord(phoneNumber);
+    if (existingUser) {
+      const alreadyMessage = alreadyRegisteredWhatsAppMessage(existingUser);
+      const outbound = await trySendWhatsAppBodyAndSave({
         to: phoneNumber,
-        body: confirmation
+        body: alreadyMessage
       });
+      sendText(res, 200, renderSuccessPage({
+        title: "Already registered",
+        message: buildFormResultMessage({
+          mainMessage: alreadyMessage,
+          outbound
+        }),
+        whatsappText: "I have registered on PayRent"
+      }), "text/html; charset=utf-8");
+      return;
     }
 
+    await processWebRegistration({ flowName, payload, phoneNumber });
+    const confirmation = webFormConfirmationMessage(flowName, payload);
+    const outbound = phoneNumber
+      ? await trySendWhatsAppBodyAndSave({ to: phoneNumber, body: confirmation })
+      : { sent: false, error: new Error("Phone number is missing.") };
+
     sendText(res, 200, renderSuccessPage({
-      message: confirmation,
+      message: buildFormResultMessage({
+        mainMessage: confirmation,
+        outbound
+      }),
       whatsappText: "I have registered on PayRent"
     }), "text/html; charset=utf-8");
-    console.log(`${flowName} web form processed for:`, phoneNumber);
+    console.log(`${flowName} web form processed for:`, {
+      phoneNumber,
+      whatsappConfirmationSent: outbound.sent
+    });
   } catch (error) {
     console.error("Web Form Error:", error);
     sendText(
@@ -1881,21 +1939,46 @@ function webFormConfirmationMessage(flowName, payload) {
   return "Congratulations ❤️ Your PayRent registration is complete. Reply MENU to continue.";
 }
 
+function alreadyRegisteredWhatsAppMessage(user) {
+  const name = user?.full_name && user.full_name !== "Unknown" ? `, ${user.full_name}` : "";
+  return [
+    `You are already registered on PayRent${name} ❤️`,
+    "",
+    "You do not need to register again.",
+    "",
+    "Reply MENU to continue."
+  ].join("\n");
+}
+
+function buildFormResultMessage({ mainMessage, outbound }) {
+  if (outbound?.sent) {
+    return [
+      mainMessage,
+      "",
+      "We have also sent this confirmation to you on WhatsApp."
+    ].join("\n");
+  }
+
+  return [
+    mainMessage,
+    "",
+    "Your details were saved, but WhatsApp confirmation could not be sent automatically.",
+    `Reason: ${outbound?.error?.message || "Twilio outbound message failed."}`,
+    "",
+    "Return to WhatsApp and send MENU to continue."
+  ].join("\n");
+}
+
 async function renderRegistrationFormOrAlreadyRegistered({ phoneNumber, formHtml }) {
   if (!phoneNumber) return formHtml;
 
-  const registeredUser = await getRegisteredUserForDecision(phoneNumber);
+  const registeredUser = await getRegisteredUserRecord(phoneNumber);
   if (!registeredUser) return formHtml;
 
-  const name = registeredUser.full_name && registeredUser.full_name !== "Unknown"
-    ? `, ${registeredUser.full_name}`
-    : "";
   return renderSuccessPage({
     title: "Already registered",
     message: [
-      `You are already registered on PayRent${name} ❤️`,
-      "",
-      "You do not need to fill this registration form again.",
+      alreadyRegisteredWhatsAppMessage(registeredUser),
       "",
       "Return to WhatsApp to continue managing your rent, savings, reminders, and PayRent account."
     ].join("\n"),

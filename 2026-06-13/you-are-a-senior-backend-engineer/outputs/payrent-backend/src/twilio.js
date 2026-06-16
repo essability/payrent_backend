@@ -31,8 +31,8 @@ export async function sendTwilioWhatsAppMessage({ accountSid, authToken, from, t
   }
 
   const params = new URLSearchParams({
-    From: from,
-    To: to.startsWith("whatsapp:") ? to : `whatsapp:${to}`
+    From: formatWhatsAppAddress(from),
+    To: formatWhatsAppAddress(to)
   });
 
   if (contentSid) {
@@ -57,6 +57,12 @@ export async function sendTwilioWhatsAppMessage({ accountSid, authToken, from, t
   }
 
   return payload;
+}
+
+function formatWhatsAppAddress(value) {
+  const address = String(value || "").trim();
+  if (address.startsWith("whatsapp:")) return address;
+  return `whatsapp:${address}`;
 }
 
 function escapeXml(value) {
