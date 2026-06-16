@@ -75,12 +75,16 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/forms/tenant-registration") {
+      const phoneNumber = url.searchParams.get("phone") || "";
       sendText(
         res,
         200,
-        renderTenantRegistrationForm({
-          phoneNumber: url.searchParams.get("phone") || "",
-          waId: url.searchParams.get("wa_id") || ""
+        await renderRegistrationFormOrAlreadyRegistered({
+          phoneNumber,
+          formHtml: renderTenantRegistrationForm({
+            phoneNumber,
+            waId: url.searchParams.get("wa_id") || ""
+          })
         }),
         "text/html; charset=utf-8"
       );
@@ -88,12 +92,16 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/forms/save-towards-rent") {
+      const phoneNumber = url.searchParams.get("phone") || "";
       sendText(
         res,
         200,
-        renderSaveTowardsRentForm({
-          phoneNumber: url.searchParams.get("phone") || "",
-          waId: url.searchParams.get("wa_id") || ""
+        await renderRegistrationFormOrAlreadyRegistered({
+          phoneNumber,
+          formHtml: renderSaveTowardsRentForm({
+            phoneNumber,
+            waId: url.searchParams.get("wa_id") || ""
+          })
         }),
         "text/html; charset=utf-8"
       );
@@ -101,12 +109,16 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/forms/landlord-registration") {
+      const phoneNumber = url.searchParams.get("phone") || "";
       sendText(
         res,
         200,
-        renderLandlordRegistrationForm({
-          phoneNumber: url.searchParams.get("phone") || "",
-          waId: url.searchParams.get("wa_id") || ""
+        await renderRegistrationFormOrAlreadyRegistered({
+          phoneNumber,
+          formHtml: renderLandlordRegistrationForm({
+            phoneNumber,
+            waId: url.searchParams.get("wa_id") || ""
+          })
         }),
         "text/html; charset=utf-8"
       );
@@ -114,12 +126,16 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && url.pathname === "/forms/property-manager-registration") {
+      const phoneNumber = url.searchParams.get("phone") || "";
       sendText(
         res,
         200,
-        renderPropertyManagerRegistrationForm({
-          phoneNumber: url.searchParams.get("phone") || "",
-          waId: url.searchParams.get("wa_id") || ""
+        await renderRegistrationFormOrAlreadyRegistered({
+          phoneNumber,
+          formHtml: renderPropertyManagerRegistrationForm({
+            phoneNumber,
+            waId: url.searchParams.get("wa_id") || ""
+          })
         }),
         "text/html; charset=utf-8"
       );
@@ -525,6 +541,19 @@ async function decidePayRentWelcomeReply({ message, phoneNumber, waId, externalU
   }
 
   if (knownUser) {
+    if (looksLikeRegisteredReturn(normalized) || looksLikeRegistrationRequest(normalized)) {
+      return {
+        reply: [
+          `You are already registered on PayRent${knownUser.full_name && knownUser.full_name !== "Unknown" ? `, ${knownUser.full_name}` : ""} ❤️`,
+          "",
+          TENANT_HOME_MENU
+        ].join("\n"),
+        selectedOption: "registered_home",
+        selectedUserType: "tenant",
+        skipSessionUpdate: true
+      };
+    }
+
     const tenantHomeDecision = await handleTenantHomeAction({
       normalized,
       text,
@@ -806,6 +835,10 @@ function isWelcomeTrigger(normalized) {
 
 function looksLikeRegistrationRequest(normalized) {
   return /\b(register|registration|sign up|signup|join|create account|open account)\b/.test(normalized);
+}
+
+function looksLikeRegisteredReturn(normalized) {
+  return /\b(i have registered|i registered|registered on payrent|done registering|registration complete|i am registered)\b/.test(normalized);
 }
 
 function looksLikePaymentRequest(normalized) {
@@ -1634,6 +1667,7 @@ function sendWhatsAppBodyInBackground({ to, body }) {
   setImmediate(async () => {
     try {
       await sendWhatsAppBody({ to, body });
+      console.log("Outbound WhatsApp sent:", { to, body });
       await service.saveMessage({
         phoneNumber: to,
         direction: "assistant",
@@ -1845,6 +1879,28 @@ function webFormConfirmationMessage(flowName, payload) {
   }
 
   return "Congratulations ❤️ Your PayRent registration is complete. Reply MENU to continue.";
+}
+
+async function renderRegistrationFormOrAlreadyRegistered({ phoneNumber, formHtml }) {
+  if (!phoneNumber) return formHtml;
+
+  const registeredUser = await getRegisteredUserForDecision(phoneNumber);
+  if (!registeredUser) return formHtml;
+
+  const name = registeredUser.full_name && registeredUser.full_name !== "Unknown"
+    ? `, ${registeredUser.full_name}`
+    : "";
+  return renderSuccessPage({
+    title: "Already registered",
+    message: [
+      `You are already registered on PayRent${name} ❤️`,
+      "",
+      "You do not need to fill this registration form again.",
+      "",
+      "Return to WhatsApp to continue managing your rent, savings, reminders, and PayRent account."
+    ].join("\n"),
+    whatsappText: "I have registered on PayRent"
+  });
 }
 
 function renderTenantRegistrationForm({ phoneNumber, waId }) {

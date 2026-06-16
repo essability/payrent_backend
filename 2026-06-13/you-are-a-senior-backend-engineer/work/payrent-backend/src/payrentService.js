@@ -20,10 +20,14 @@ export class PayRentService {
   }
 
   async findUserByPhone(phoneNumber, { required = true } = {}) {
-    const user = await this.db.select("users", {
-      query: `?phone_number=${eq(phoneNumber)}&select=*`,
-      single: true
-    });
+    let user = null;
+    for (const candidate of phoneNumberCandidates(phoneNumber)) {
+      user = await this.db.select("users", {
+        query: `?phone_number=${eq(candidate)}&select=*`,
+        single: true
+      });
+      if (user) break;
+    }
 
     if (!user && required) throw new Error(`User not found for phone number: ${phoneNumber}`);
     return user;
@@ -1085,4 +1089,12 @@ function normalizeSignupChannel(value) {
   if (normalized === "web_form") return "web";
   if (["whatsapp", "web", "dashboard", "internal"].includes(normalized)) return normalized;
   return "whatsapp";
+}
+
+function phoneNumberCandidates(phoneNumber) {
+  const value = String(phoneNumber || "").replace(/^whatsapp:/, "").trim();
+  const withoutSpaces = value.replace(/\s+/g, "");
+  const withoutPlus = withoutSpaces.replace(/^\+/, "");
+  const withPlus = withoutPlus ? `+${withoutPlus}` : "";
+  return [...new Set([value, withoutSpaces, withPlus, withoutPlus].filter(Boolean))];
 }
